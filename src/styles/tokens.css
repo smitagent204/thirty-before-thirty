@@ -1,0 +1,124 @@
+:root {
+  /* ── база ── */
+  --c-ink: #1a120b;
+  --c-ink-2: #241812;
+  --c-stone: #2e2a26;
+  --c-parchment: #f3e3c3;
+  --c-parchment-dim: #d8c39a;
+  --c-text: #f7eedd;
+  --c-text-muted: #c9b79a;
+
+  /* ── золото и металлы ── */
+  --c-gold-100: #ffe9a8;
+  --c-gold-300: #ffd75e;
+  --c-gold-500: #f2b233;
+  --c-gold-700: #b9791e;
+  --c-gold-900: #6b4212;
+  --c-wood-500: #8b5a2b;
+  --c-wood-700: #5d3a1a;
+  --c-bronze: #c98a4b;
+
+  /* ── редкости ── */
+  --c-common: #c98a4b;
+  --c-common-light: #e6b483;
+  --c-rare: #f2a33c;
+  --c-rare-light: #ffd490;
+  --c-epic: #a55cff;
+  --c-epic-light: #d3a8ff;
+  --c-legend: #57e0ff;
+  --c-legend-light: #b5f2ff;
+  --c-mythic: #ffd75e;
+
+  /* ── семантика ── */
+  --c-success: #63d471;
+  --c-danger: #ff6b6b;
+  --c-info: #35c7f0;
+
+  /* ── градиенты ── */
+  --g-common: linear-gradient(160deg, #3a2418, #6b4226 48%, #c98a4b);
+  --g-rare: linear-gradient(160deg, #1b2a18, #3e6b3a 45%, #e0a94a);
+  --g-epic: linear-gradient(160deg, #241436, #5b2a86 48%, #c86bff);
+  --g-legend: linear-gradient(135deg, #0e2a3a, #1e5f7a 35%, #57e0ff 65%, #ffd75e);
+  --g-mythic: linear-gradient(160deg, #5d3a1a, #b9791e 55%, #ffd75e);
+  --g-btn: linear-gradient(180deg, #ffe9a8, #ffc94a 45%, #e89a1c);
+  --g-card: linear-gradient(180deg, #33271e, #241a13);
+  --g-scrim: linear-gradient(180deg, rgba(12, 8, 5, 0), rgba(12, 8, 5, 0.86));
+
+  /* ── радиусы ── */
+  --r-xs: 6px;
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-xl: 28px;
+  --r-pill: 999px;
+
+  /* ── отступы (сетка 4pt) ── */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 20px;
+  --s-6: 24px;
+  --s-8: 32px;
+  --s-10: 40px;
+
+  /* ── тени и фаски ── */
+  --sh-card: inset 0 2px 0 rgba(255, 255, 255, 0.06), inset 0 -3px 0 rgba(0, 0, 0, 0.35),
+    0 8px 20px rgba(0, 0, 0, 0.45);
+  --sh-btn: inset 0 2px 0 rgba(255, 255, 255, 0.55), inset 0 -4px 0 rgba(120, 70, 10, 0.55),
+    0 6px 0 #6b4212, 0 10px 18px rgba(0, 0, 0, 0.45);
+  --sh-btn-press: inset 0 1px 0 rgba(255, 255, 255, 0.35), inset 0 -2px 0 rgba(120, 70, 10, 0.5),
+    0 2px 0 #6b4212, 0 4px 10px rgba(0, 0, 0, 0.4);
+  --sh-glow: 0 0 24px rgba(255, 215, 94, 0.55);
+
+  /* ── типографика ── */
+  --font-display: 'Russo One', system-ui, sans-serif;
+  --font-body: 'Play', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-num: 'Rubik Mono One', 'Play', sans-serif;
+  --font-hand: 'Caveat', cursive;
+
+  --fs-display: 28px;
+  --fs-h1: 22px;
+  --fs-h2: 18px;
+  --fs-body: 16px;
+  --fs-sm: 14px;
+  --fs-xs: 12px;
+  --lh-tight: 1.1;
+  --lh-body: 1.45;
+  --ls-caps: 0.06em;
+
+  /* ── motion ── */
+  --d-fast: 120ms;
+  --d-base: 220ms;
+  --d-slow: 360ms;
+  --d-scene: 900ms;
+  --e-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --e-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --e-overshoot: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ── layout ── */
+  --app-w: 480px;
+  --safe-top: max(env(safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px));
+  --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px));
+  --header-h: 56px;
+  --progress-h: 48px;
+  --tabbar-h: 64px;
+  --content-pad: 16px;
+
+  --z-sticky: 10;
+  --z-tabbar: 20;
+  --z-sheet: 40;
+  --z-toast: 60;
+  --z-fx: 80;
+
+  color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --d-fast: 1ms;
+    --d-base: 1ms;
+    --d-slow: 1ms;
+    --d-scene: 1ms;
+  }
+}
