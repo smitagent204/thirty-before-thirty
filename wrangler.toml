@@ -1,0 +1,11 @@
+name = "thirty-before-thirty"
+compatibility_date = "2025-09-01"
+pages_build_output_dir = "dist"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "thirty-db"
+database_id = "4fda2bab-6eca-4985-a341-f6ce57cf222b"
+
+[ai]
+binding = "AI"
