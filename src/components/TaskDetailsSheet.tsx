@@ -3,6 +3,8 @@ import { motion } from 'framer-motion';
 import { LEVEL_BY_ID } from '@shared/levels';
 import type { AiVerdict, Task, TaskStatus } from '@shared/types';
 import { impact, notify } from '../telegram/useTelegram';
+import { api, ApiError, hasTelegramAuth } from '../api/client';
+import { compressPhoto } from '../lib/photo';
 import { ManualApprovalSheet } from './ManualApprovalSheet';
 
 type Phase = 'idle' | 'checking' | 'pass' | 'fail';
@@ -15,7 +17,10 @@ interface TaskDetailsSheetProps {
   forceFail: boolean;
   onClose: () => void;
   onComplete: (taskId: string) => void;
-  onManualComplete: (taskId: string) => void;
+  /** Подтянуть состояние с сервера после успешной проверки. */
+  onChecked: () => Promise<void>;
+  onDevComplete: (taskId: string) => Promise<void>;
+  onManualComplete: (taskId: string, pin: string) => Promise<boolean>;
 }
 
 export function TaskDetailsSheet({
@@ -26,10 +31,13 @@ export function TaskDetailsSheet({
   forceFail,
   onClose,
   onComplete,
+  onChecked,
+  onDevComplete,
   onManualComplete,
 }: TaskDetailsSheetProps) {
   const level = LEVEL_BY_ID.get(task.level);
   const [phase, setPhase] = useState<Phase>('idle');
+  const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<AiVerdict | null>(null);
@@ -49,42 +57,84 @@ export function TaskDetailsSheet({
     };
   }, [preview]);
 
-  const pickFile = (file: File | null) => {
-    if (!file) return;
+  const pickFile = (next: File | null) => {
+    if (!next) return;
     if (preview) URL.revokeObjectURL(preview);
-    setPreview(URL.createObjectURL(file));
-    setFileName(file.name);
+    setFile(next);
+    setPreview(URL.createObjectURL(next));
+    setFileName(next.name);
     setPhase('idle');
     setVerdict(null);
   };
 
-  const checkPhoto = () => {
-    if (!preview) return;
+  const checkPhoto = async () => {
+    if (!file || phase === 'checking') return;
     impact('medium');
     setPhase('checking');
-    timer.current = window.setTimeout(() => {
-      if (forceFail) {
+    setVerdict(null);
+
+    // Вне Telegram — локальная имитация, чтобы можно было смотреть анимации.
+    if (!hasTelegramAuth()) {
+      timer.current = window.setTimeout(() => {
+        if (forceFail) {
+          setVerdict({
+            score: 38,
+            verdict: 'fail',
+            reason:
+              'На кадре не видно того, что просит задание. Попробуй снять ближе и так, чтобы в кадр попал результат.',
+            confidence: 0.74,
+          });
+          setPhase('fail');
+          notify('error');
+          return;
+        }
+        const score = 78 + Math.floor(Math.random() * 16);
         setVerdict({
-          score: 38,
-          verdict: 'fail',
-          reason:
-            'На кадре не видно того, что просит задание. Попробуй снять ближе и так, чтобы в кадр попал результат.',
-          confidence: 0.74,
+          score,
+          verdict: 'pass',
+          reason: 'Кадр соответствует заданию: видно всё, что нужно. Отличная работа!',
+          confidence: 0.86,
         });
+        setPhase('pass');
+        notify('success');
+      }, 1700);
+      return;
+    }
+
+    try {
+      const image = await compressPhoto(file);
+      const result = await api.check(task.id, image, isDev && forceFail);
+      setVerdict({
+        score: result.score,
+        verdict: result.verdict,
+        reason: result.reason,
+        confidence: result.confidence,
+      });
+      if (result.pass) {
+        setPhase('pass');
+        notify('success');
+        void onChecked();
+      } else {
         setPhase('fail');
         notify('error');
-        return;
       }
-      const score = 78 + Math.floor(Math.random() * 16);
-      setVerdict({
-        score,
-        verdict: 'pass',
-        reason: 'Кадр соответствует заданию: видно всё, что нужно. Отличная работа!',
-        confidence: 0.86,
-      });
-      setPhase('pass');
-      notify('success');
-    }, 1700);
+    } catch (error) {
+      const message =
+        error instanceof ApiError
+          ? error.code === 'already_completed'
+            ? 'Это задание уже выполнено.'
+            : error.code === 'task_locked'
+              ? 'Сначала выполни предыдущее задание.'
+              : error.code === 'image_too_large' || error.code === 'photo_too_large'
+                ? 'Фото слишком большое. Попробуй другой кадр.'
+                : error.code === 'ai_unavailable'
+                  ? 'Проверка фото временно недоступна. Попробуй позже.'
+                  : 'Не удалось проверить фото. Попробуй ещё раз.'
+          : 'Не удалось проверить фото. Проверь интернет и попробуй ещё раз.';
+      setPhase('idle');
+      setVerdict({ score: 0, verdict: 'fail', reason: message, confidence: 0 });
+      notify('error');
+    }
   };
 
   const collect = () => {
@@ -93,12 +143,14 @@ export function TaskDetailsSheet({
     onClose();
   };
 
-  const devComplete = () => {
-    onComplete(task.id);
+  const devComplete = async () => {
+    await onDevComplete(task.id);
     onClose();
   };
 
-  const done = status === 'completed';
+  // Фиксируем на момент открытия: если сервер подтвердит задание, пока лист открыт,
+  // не переключаем интерфейс под руками — пользователь сам нажмёт «Забрать».
+  const [done] = useState(() => status === 'completed');
 
   return (
     <motion.div
@@ -225,8 +277,8 @@ export function TaskDetailsSheet({
               <button
                 type="button"
                 className="btn"
-                disabled={!preview || phase === 'checking'}
-                onClick={checkPhoto}
+                disabled={!file || phase === 'checking'}
+                onClick={() => void checkPhoto()}
               >
                 {phase === 'checking' ? 'Проверяем…' : 'Проверить фото'}
               </button>
@@ -248,7 +300,7 @@ export function TaskDetailsSheet({
                 type="button"
                 className="btn btn--ghost btn--sm"
                 style={{ marginTop: 10 }}
-                onClick={devComplete}
+                onClick={() => void devComplete()}
               >
                 Завершить без фото (dev)
               </button>
@@ -259,9 +311,9 @@ export function TaskDetailsSheet({
       {manualOpen && (
         <ManualApprovalSheet
           onClose={() => setManualOpen(false)}
+          onSubmit={(pin) => onManualComplete(task.id, pin)}
           onSuccess={() => {
             setManualOpen(false);
-            onManualComplete(task.id);
             onClose();
           }}
         />

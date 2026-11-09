@@ -36,3 +36,12 @@ CREATE TABLE IF NOT EXISTS app_state (
   chest_opened INTEGER NOT NULL DEFAULT 0,
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
+
+-- Чувствительный QR-приз: хранится только здесь и отдаётся через /api/prize
+-- после открытия сундука. В public/ его класть нельзя.
+CREATE TABLE IF NOT EXISTS prizes (
+  id TEXT PRIMARY KEY,
+  mime TEXT NOT NULL,
+  image TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

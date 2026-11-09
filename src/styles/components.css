@@ -859,3 +859,53 @@
   z-index: 1;
   width: 100%;
 }
+
+/* ─────────────────────────── Экран «доступ закрыт» ─────────────────────────── */
+
+.server-gate {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: calc(var(--safe-top) + 32px) var(--content-pad)
+    calc(var(--safe-bottom) + 32px);
+  text-align: center;
+}
+
+.server-gate__crest {
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 96px;
+  border: 2px solid rgba(255, 215, 94, 0.5);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 50% 35%, rgba(255, 215, 94, 0.25), transparent 68%),
+    rgba(255, 215, 94, 0.06);
+  box-shadow:
+    0 0 0 8px rgba(255, 215, 94, 0.04),
+    0 18px 40px rgba(0, 0, 0, 0.45);
+  font-family: var(--font-display);
+  font-size: 40px;
+  color: var(--c-gold-500);
+  text-shadow: 0 2px 12px rgba(255, 215, 94, 0.45);
+}
+
+.server-gate__title {
+  margin: 6px 0 0;
+  font-family: var(--font-display);
+  font-size: 26px;
+  letter-spacing: 0.03em;
+}
+
+.server-gate__text {
+  max-width: 30ch;
+  margin: 0;
+  color: var(--c-text-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}

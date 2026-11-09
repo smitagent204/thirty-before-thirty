@@ -3,6 +3,13 @@ import { persist } from 'zustand/middleware';
 import { TASKS } from '@shared/tasks';
 import { isDevRequested } from '../telegram/useTelegram';
 
+export interface HydrateState {
+  completed: string[];
+  manualCompleted: string[];
+  chestOpened: boolean;
+  isOwner?: boolean;
+}
+
 interface ProgressState {
   completed: string[];
   /** Задания, засчитанные вручную по коду подтверждения */
@@ -10,6 +17,9 @@ interface ProgressState {
   chestOpened: boolean;
   devMode: boolean;
   forceFail: boolean;
+  /** Пришло с сервера: владелец может пользоваться dev-панелью */
+  isOwner: boolean;
+  hydrate: (state: HydrateState) => void;
   markCompleted: (taskId: string) => void;
   completeManually: (taskId: string) => void;
   toggleCompleted: (taskId: string) => void;
@@ -30,6 +40,15 @@ export const useProgressStore = create<ProgressState>()(
       chestOpened: false,
       devMode: isDevRequested(),
       forceFail: false,
+      isOwner: false,
+
+      hydrate: (state) =>
+        set({
+          completed: state.completed,
+          manualCompleted: state.manualCompleted,
+          chestOpened: state.chestOpened,
+          ...(state.isOwner === undefined ? {} : { isOwner: state.isOwner }),
+        }),
 
       markCompleted: (taskId) =>
         set((state) =>

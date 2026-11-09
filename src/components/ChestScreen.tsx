@@ -15,7 +15,8 @@ interface ChestScreenProps {
   isDev: boolean;
   /** Репетиция в dev-режиме: открытие не сохраняется. */
   preview: boolean;
-  onOpenChest: () => void;
+  /** Сохраняет открытие на сервере. false — открыть не удалось. */
+  onOpenChest: () => Promise<boolean>;
 }
 
 interface Particle {
@@ -64,6 +65,18 @@ export function ChestScreen({
     });
   }, []);
 
+  const finish = async () => {
+    if (!preview) {
+      const ok = await onOpenChest();
+      if (!ok) {
+        setPhase('idle');
+        return;
+      }
+    }
+    setPhase('open');
+    notify('success');
+  };
+
   const open = () => {
     if (!ready || phase !== 'idle') return;
     impact('heavy');
@@ -73,9 +86,7 @@ export function ChestScreen({
       notify('warning');
     }, 540);
     const second = window.setTimeout(() => {
-      setPhase('open');
-      if (!preview) onOpenChest();
-      notify('success');
+      void finish();
     }, 1900);
     timers.current.push(first, second);
   };
@@ -84,8 +95,7 @@ export function ChestScreen({
     if (phase !== 'opening') return;
     timers.current.forEach((id) => window.clearTimeout(id));
     timers.current = [];
-    setPhase('open');
-    if (!preview) onOpenChest();
+    void finish();
   };
 
   const chestClass = [

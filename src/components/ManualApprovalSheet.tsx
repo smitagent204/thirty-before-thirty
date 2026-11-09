@@ -6,17 +6,20 @@ import {
   type CSSProperties,
   type KeyboardEvent,
 } from 'react';
-import { MANUAL_APPROVAL_PIN, MANUAL_PIN_LENGTH } from '../config';
+import { MANUAL_PIN_LENGTH } from '../config';
 import { impact, notify } from '../telegram/useTelegram';
 
 interface ManualApprovalSheetProps {
   onClose: () => void;
+  /** Проверяет код на сервере. Возвращает true, если задание засчитано. */
+  onSubmit: (pin: string) => Promise<boolean>;
   onSuccess: () => void;
 }
 
-export function ManualApprovalSheet({ onClose, onSuccess }: ManualApprovalSheetProps) {
+export function ManualApprovalSheet({ onClose, onSubmit, onSuccess }: ManualApprovalSheetProps) {
   const [digits, setDigits] = useState<string[]>(() => Array(MANUAL_PIN_LENGTH).fill(''));
   const [error, setError] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [shakeKey, setShakeKey] = useState(0);
   const refs = useRef<Array<HTMLInputElement | null>>([]);
 
@@ -68,18 +71,28 @@ export function ManualApprovalSheet({ onClose, onSuccess }: ManualApprovalSheetP
       refs.current[index - 1]?.focus();
     }
     if (event.key === 'Enter') {
-      submit();
+      void submit();
     }
   };
 
-  const submit = () => {
-    if (code.length !== MANUAL_PIN_LENGTH) return;
-    if (code === MANUAL_APPROVAL_PIN) {
+  const submit = async () => {
+    if (busy || code.length !== MANUAL_PIN_LENGTH) return;
+    impact('light');
+    setBusy(true);
+    let ok = false;
+    try {
+      ok = await onSubmit(code);
+    } finally {
+      setBusy(false);
+    }
+
+    if (ok) {
       impact('medium');
       notify('success');
       onSuccess();
       return;
     }
+
     impact('rigid');
     notify('error');
     setError(true);
@@ -144,7 +157,7 @@ export function ManualApprovalSheet({ onClose, onSuccess }: ManualApprovalSheetP
 
           {error && (
             <p className="pin-error" aria-live="polite">
-              Неверный код. Попробуй ещё раз.
+              Не удалось подтвердить. Проверь код и попробуй ещё раз.
             </p>
           )}
         </div>
@@ -153,10 +166,10 @@ export function ManualApprovalSheet({ onClose, onSuccess }: ManualApprovalSheetP
           <button
             type="button"
             className="btn"
-            disabled={code.length !== MANUAL_PIN_LENGTH}
-            onClick={submit}
+            disabled={code.length !== MANUAL_PIN_LENGTH || busy}
+            onClick={() => void submit()}
           >
-            Подтвердить
+            {busy ? 'Проверяем…' : 'Подтвердить'}
           </button>
           <button
             type="button"

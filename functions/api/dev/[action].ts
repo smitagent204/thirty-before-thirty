@@ -12,6 +12,13 @@ interface ToggleBody {
   taskId?: string;
 }
 
+interface PrizeBody {
+  image?: string;
+}
+
+const MAX_PRIZE_BASE64 = 1_500_000;
+const PRIZE_RE = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=\s]+)$/;
+
 async function completeAll(ctx: Ctx, telegramId: number): Promise<Response> {
   const statements = TASKS.map((task) =>
     ctx.env.DB.prepare(
@@ -71,6 +78,29 @@ async function reset(ctx: Ctx, telegramId: number): Promise<Response> {
   return json({ completed: [], manualCompleted: [], chestOpened: false, isOwner: true });
 }
 
+/** Загрузка чувствительного QR-приза. Доступна только владельцу. */
+async function savePrize(ctx: Ctx): Promise<Response> {
+  const body = await readJson<PrizeBody>(ctx.request);
+  const match = typeof body?.image === 'string' ? PRIZE_RE.exec(body.image) : null;
+  if (!match) return json({ error: 'invalid_image' }, 400);
+
+  const base64 = match[2].replace(/\s/g, '');
+  if (base64.length > MAX_PRIZE_BASE64) return json({ error: 'image_too_large' }, 413);
+
+  await ctx.env.DB.prepare(
+    `INSERT INTO prizes (id, mime, image, updated_at)
+     VALUES ('main', ?, ?, datetime('now'))
+     ON CONFLICT(id) DO UPDATE SET
+       mime = excluded.mime,
+       image = excluded.image,
+       updated_at = datetime('now')`,
+  )
+    .bind(match[1], base64)
+    .run();
+
+  return json({ ok: true });
+}
+
 export const onRequestPost = async (ctx: Ctx): Promise<Response> => {
   const auth = await authenticate(ctx.request, ctx.env);
   if (auth instanceof Response) return auth;
@@ -86,6 +116,8 @@ export const onRequestPost = async (ctx: Ctx): Promise<Response> => {
         return await toggle(ctx, auth.user.id);
       case 'reset':
         return await reset(ctx, auth.user.id);
+      case 'prize':
+        return await savePrize(ctx);
       default:
         return json({ error: 'unknown_action' }, 404);
     }
