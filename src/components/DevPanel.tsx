@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { LEVELS } from '@shared/levels';
 import { nextAvailableTask, tasksOfLevel } from '@shared/progress';
 import { api, ApiError, hasTelegramAuth } from '../api/client';
@@ -27,7 +27,27 @@ export function DevPanel({ onClose }: DevPanelProps) {
   const [prizeNote, setPrizeNote] = useState<string | null>(null);
   const [prizePreview, setPrizePreview] = useState<string | null>(null);
   const [prizeLink, setPrizeLink] = useState<string | null>(null);
+  const [wifeCompleted, setWifeCompleted] = useState<string[]>([]);
+  const [wifeConfigured, setWifeConfigured] = useState<boolean | null>(null);
   const prizeInput = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!serverMode) return;
+    let cancelled = false;
+    api
+      .wife()
+      .then((state) => {
+        if (cancelled) return;
+        setWifeCompleted(state.completed);
+        setWifeConfigured(state.configured);
+      })
+      .catch(() => {
+        if (!cancelled) setWifeConfigured(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [serverMode]);
 
   const runServer = async (action: string, body?: unknown): Promise<boolean> => {
     setBusy(true);
@@ -253,6 +273,12 @@ export function DevPanel({ onClose }: DevPanelProps) {
             победитель видит его после открытия сундука, а владелец может проверить заранее.
           </p>
 
+          <p className="dev-note">
+            {wifeConfigured === false
+              ? 'USER_TELEGRAM_ID не задан — прогресс второго пользователя недоступен.'
+              : 'Розовый кружок — задание выполнено женой.'}
+          </p>
+
           {LEVELS.map((level) => (
             <div key={level.id}>
               <h4 className="sheet__section-title" style={{ marginTop: 16 }}>
@@ -264,6 +290,13 @@ export function DevPanel({ onClose }: DevPanelProps) {
                   return (
                     <div className="dev-row" key={task.id}>
                       <div className="dev-row__main">
+                        {wifeCompleted.includes(task.id) && (
+                          <span
+                            className="dev-row__wife-dot"
+                            title="Выполнено женой"
+                            aria-label="Выполнено женой"
+                          />
+                        )}
                         {task.title}
                         <div className="dev-row__sub">
                           {task.id} · +{task.points}

@@ -23,6 +23,13 @@ export interface PrizeResult {
   image: string;
 }
 
+export interface WifeState {
+  completed: string[];
+  manualCompleted: string[];
+  chestOpened: boolean;
+  configured: boolean;
+}
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -90,4 +97,6 @@ export const api = {
       method: 'POST',
       body: body === undefined ? undefined : JSON.stringify(body),
     }),
+
+  wife: () => request<WifeState>('/api/dev/wife', { method: 'POST' }),
 };

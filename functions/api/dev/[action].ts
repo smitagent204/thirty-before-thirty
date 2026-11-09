@@ -69,6 +69,23 @@ async function toggle(ctx: Ctx, telegramId: number): Promise<Response> {
   return json({ ...(await loadState(ctx.env, telegramId)), isOwner: true });
 }
 
+/** Прогресс второго пользователя — чтобы владелец видел его в dev-панели. */
+async function wifeState(ctx: Ctx): Promise<Response> {
+  const raw = ctx.env.USER_TELEGRAM_ID?.trim();
+  const telegramId = raw ? Number(raw) : NaN;
+  if (!raw || !Number.isFinite(telegramId) || telegramId <= 0) {
+    return json({
+      completed: [],
+      manualCompleted: [],
+      chestOpened: false,
+      configured: false,
+    });
+  }
+
+  const state = await loadState(ctx.env, telegramId);
+  return json({ ...state, configured: true });
+}
+
 async function reset(ctx: Ctx, telegramId: number): Promise<Response> {
   await ctx.env.DB.batch([
     ctx.env.DB.prepare('DELETE FROM completions WHERE telegram_id = ?').bind(telegramId),
@@ -116,6 +133,8 @@ export const onRequestPost = async (ctx: Ctx): Promise<Response> => {
         return await toggle(ctx, auth.user.id);
       case 'reset':
         return await reset(ctx, auth.user.id);
+      case 'wife':
+        return await wifeState(ctx);
       case 'prize':
         return await savePrize(ctx);
       default:
