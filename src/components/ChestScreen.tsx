@@ -165,14 +165,16 @@ export function ChestScreen({
 
         <div className={phase === 'opening' ? 'flash is-on' : 'flash'} aria-hidden="true" />
 
-        <div style={{ width: '100%', marginTop: 6 }}>
-          <ProgressRoadmap
-            value={preview ? TOTAL_POINTS : points}
-            max={TOTAL_POINTS}
-            ready={ready}
-            caption="Общий прогресс"
-          />
-        </div>
+        {phase !== 'open' && (
+          <div style={{ width: '100%', marginTop: 6 }}>
+            <ProgressRoadmap
+              value={preview ? TOTAL_POINTS : points}
+              max={TOTAL_POINTS}
+              ready={ready}
+              caption="Общий прогресс"
+            />
+          </div>
+        )}
 
         {!opened && phase !== 'open' && (
           <button
