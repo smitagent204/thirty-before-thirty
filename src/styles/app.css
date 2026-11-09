@@ -223,7 +223,8 @@ button {
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 6px var(--content-pad) 28px;
+  /* Без верхнего padding: sticky-прогресс должен прилипать вплотную к шапке. */
+  padding: 0 var(--content-pad) 28px;
   scrollbar-width: none;
 }
 
@@ -241,7 +242,7 @@ button {
 
 .level-hero {
   position: relative;
-  margin: 8px 0 14px;
+  margin: 14px 0;
   padding: 16px;
   border-radius: var(--r-lg);
   background: var(--level-gradient, var(--g-rare));
