@@ -98,7 +98,11 @@
 
   /* ── layout ── */
   --app-w: 480px;
-  --safe-top: max(env(safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px));
+  /* Системный вырез + верхняя панель Telegram (закрыть / настройки) в fullscreen. */
+  --safe-top: calc(
+    max(env(safe-area-inset-top, 0px), var(--tg-safe-area-inset-top, 0px)) +
+      var(--tg-content-safe-area-inset-top, 0px)
+  );
   --safe-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px));
   --header-h: 56px;
   --progress-h: 48px;

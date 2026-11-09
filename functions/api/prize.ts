@@ -1,21 +1,24 @@
 import { authenticate, json, type Ctx } from './_shared';
 
 /**
- * Выдаёт QR-приз только авторизованному пользователю,
- * который уже открыл сундук. Публичного URL у картинки нет.
+ * Выдаёт QR-приз победителю после открытия сундука.
+ * Владелец может посмотреть приз заранее, чтобы проверить загрузку.
+ * Публичного URL у картинки нет.
  */
 export const onRequestGet = async ({ request, env }: Ctx): Promise<Response> => {
   const auth = await authenticate(request, env);
   if (auth instanceof Response) return auth;
 
   try {
-    const state = await env.DB.prepare(
-      'SELECT chest_opened FROM app_state WHERE telegram_id = ?',
-    )
-      .bind(auth.user.id)
-      .first<{ chest_opened: number }>();
+    if (!auth.isOwner) {
+      const state = await env.DB.prepare(
+        'SELECT chest_opened FROM app_state WHERE telegram_id = ?',
+      )
+        .bind(auth.user.id)
+        .first<{ chest_opened: number }>();
 
-    if (!state?.chest_opened) return json({ error: 'chest_locked' }, 403);
+      if (!state?.chest_opened) return json({ error: 'chest_locked' }, 403);
+    }
 
     const prize = await env.DB.prepare(
       'SELECT mime, image FROM prizes WHERE id = ?',

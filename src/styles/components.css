@@ -665,6 +665,23 @@
   line-height: 1.5;
 }
 
+.dev-prize {
+  display: flex;
+  justify-content: center;
+  margin-top: 12px;
+}
+
+.dev-prize img {
+  width: 180px;
+  max-width: 100%;
+  aspect-ratio: 1;
+  object-fit: contain;
+  padding: 8px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.45);
+}
+
 /* ─────────────────────────── Toast ─────────────────────────── */
 
 .toast {

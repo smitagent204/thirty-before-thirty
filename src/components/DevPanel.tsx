@@ -1,7 +1,7 @@
 import { useRef, useState, type CSSProperties } from 'react';
 import { LEVELS } from '@shared/levels';
 import { nextAvailableTask, tasksOfLevel } from '@shared/progress';
-import { api, hasTelegramAuth } from '../api/client';
+import { api, ApiError, hasTelegramAuth } from '../api/client';
 import { readFileAsDataUrl } from '../lib/photo';
 import { useProgressStore } from '../store/useProgressStore';
 
@@ -23,6 +23,7 @@ export function DevPanel({ onClose }: DevPanelProps) {
   const serverMode = hasTelegramAuth();
   const [busy, setBusy] = useState(false);
   const [prizeNote, setPrizeNote] = useState<string | null>(null);
+  const [prizePreview, setPrizePreview] = useState<string | null>(null);
   const prizeInput = useRef<HTMLInputElement>(null);
 
   const runServer = async (action: string, body?: unknown): Promise<boolean> => {
@@ -84,12 +85,38 @@ export function DevPanel({ onClose }: DevPanelProps) {
     try {
       const image = await readFileAsDataUrl(file);
       await api.dev('prize', { image });
-      setPrizeNote('QR-приз сохранён. Победитель увидит его после открытия сундука.');
+      // Читаем обратно с сервера: так видно не только выбор файла, но и то,
+      // что QR действительно сохранился в D1.
+      const saved = await api.prize();
+      setPrizePreview(saved.image);
+      // Если экран приза уже открыт, он перезапросит картинку без перезагрузки.
+      window.dispatchEvent(new Event('prize-updated'));
+      setPrizeNote('QR-приз сохранён в базе. Победитель увидит его после открытия сундука.');
     } catch {
       setPrizeNote('Не удалось загрузить QR. Проверь формат PNG/JPEG/WebP и размер.');
     } finally {
       setBusy(false);
       if (prizeInput.current) prizeInput.current.value = '';
+    }
+  };
+
+  const checkPrize = async () => {
+    if (!serverMode) return;
+    setBusy(true);
+    setPrizeNote(null);
+    try {
+      const saved = await api.prize();
+      setPrizePreview(saved.image);
+      setPrizeNote('QR-приз найден в базе.');
+    } catch (error) {
+      setPrizePreview(null);
+      setPrizeNote(
+        error instanceof ApiError && error.code === 'prize_not_found'
+          ? 'В базе пока нет QR-приза.'
+          : 'Не удалось получить QR-приз с сервера.',
+      );
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -157,14 +184,24 @@ export function DevPanel({ onClose }: DevPanelProps) {
               Сбросить прогресс
             </button>
             {serverMode && (
-              <button
-                type="button"
-                className="btn btn--ghost btn--sm"
-                disabled={busy}
-                onClick={() => prizeInput.current?.click()}
-              >
-                Загрузить QR-приз
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  disabled={busy}
+                  onClick={() => prizeInput.current?.click()}
+                >
+                  Загрузить QR-приз
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--ghost btn--sm"
+                  disabled={busy}
+                  onClick={() => void checkPrize()}
+                >
+                  Показать QR-приз
+                </button>
+              </>
             )}
             <input
               ref={prizeInput}
@@ -181,9 +218,15 @@ export function DevPanel({ onClose }: DevPanelProps) {
 
           {prizeNote && <p className="dev-note">{prizeNote}</p>}
 
+          {prizePreview && (
+            <div className="dev-prize">
+              <img src={prizePreview} alt="Загруженный QR-приз" />
+            </div>
+          )}
+
           <p className="dev-note">
-            Панель доступна только Telegram ID владельца. QR-приз хранится в защищённой базе
-            и выдаётся победителю только после открытия сундука.
+            Панель доступна только Telegram ID владельца. QR-приз хранится в защищённой базе:
+            победитель видит его после открытия сундука, а владелец может проверить заранее.
           </p>
 
           {LEVELS.map((level) => (
