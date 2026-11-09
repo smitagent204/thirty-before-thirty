@@ -65,10 +65,8 @@
   /* ── тени и фаски ── */
   --sh-card: inset 0 2px 0 rgba(255, 255, 255, 0.06), inset 0 -3px 0 rgba(0, 0, 0, 0.35),
     0 8px 20px rgba(0, 0, 0, 0.45);
-  --sh-btn: inset 0 2px 0 rgba(255, 255, 255, 0.55), inset 0 -4px 0 rgba(120, 70, 10, 0.55),
-    0 6px 0 #6b4212, 0 10px 18px rgba(0, 0, 0, 0.45);
-  --sh-btn-press: inset 0 1px 0 rgba(255, 255, 255, 0.35), inset 0 -2px 0 rgba(120, 70, 10, 0.5),
-    0 2px 0 #6b4212, 0 4px 10px rgba(0, 0, 0, 0.4);
+  --sh-btn: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 4px 0 #7a4c16;
+  --sh-btn-press: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 1px 0 #7a4c16;
   --sh-glow: 0 0 24px rgba(255, 215, 94, 0.55);
 
   /* ── типографика ── */

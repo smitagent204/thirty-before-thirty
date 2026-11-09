@@ -21,6 +21,16 @@ export function notify(type: 'error' | 'success' | 'warning') {
   haptic()?.notificationOccurred(type);
 }
 
+/** Открывает внешнюю ссылку через Telegram, иначе — в новой вкладке браузера. */
+export function openExternalLink(url: string) {
+  const app = typeof window !== 'undefined' ? window.Telegram?.WebApp : undefined;
+  if (app?.openLink) {
+    app.openLink(url, { try_instant_view: false });
+    return;
+  }
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
 export function useTelegram(): TelegramContext {
   // SDK грузится асинхронно; этот счётчик перерисовывает компонент, когда он появился.
   const [sdkTick, setSdkTick] = useState(0);

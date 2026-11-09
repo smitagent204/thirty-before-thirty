@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { PRIZE_QR_PATH } from '@shared/config';
 import { api, ApiError, hasTelegramAuth } from '../api/client';
+import { decodeQrLink } from '../lib/qr';
+import { impact, openExternalLink } from '../telegram/useTelegram';
 
 interface PrizeCardProps {
   isDev?: boolean;
@@ -13,6 +15,8 @@ export function PrizeCard({ isDev = false }: PrizeCardProps) {
   const [loading, setLoading] = useState(() => hasTelegramAuth());
   const [broken, setBroken] = useState(false);
   const [error, setError] = useState<PrizeError>(null);
+  const [link, setLink] = useState<string | null>(null);
+  const decodeSeq = useRef(0);
 
   const load = useCallback(async () => {
     // Вне Telegram QR берётся из public — это только локальная разработка.
@@ -25,10 +29,22 @@ export function PrizeCard({ isDev = false }: PrizeCardProps) {
 
     setLoading(true);
     setError(null);
+    setLink(null);
     try {
       const result = await api.prize();
       setSrc(result.image);
       setBroken(false);
+
+      // Ссылка из QR остаётся только в памяти: не выводим её текстом и не шлём наружу.
+      const seq = decodeSeq.current + 1;
+      decodeSeq.current = seq;
+      void decodeQrLink(result.image)
+        .then((value) => {
+          if (seq === decodeSeq.current) setLink(value);
+        })
+        .catch(() => {
+          if (seq === decodeSeq.current) setLink(null);
+        });
     } catch (reason) {
       setSrc(null);
       const code = reason instanceof ApiError ? reason.code : '';
@@ -56,6 +72,12 @@ export function PrizeCard({ isDev = false }: PrizeCardProps) {
       document.removeEventListener('visibilitychange', onVisible);
     };
   }, [load]);
+
+  const openPrizeLink = () => {
+    if (!link) return;
+    impact('medium');
+    openExternalLink(link);
+  };
 
   const message =
     isDev && error === 'chest_locked'
@@ -85,6 +107,11 @@ export function PrizeCard({ isDev = false }: PrizeCardProps) {
             alt="QR-код с сертификатом"
             onError={() => setBroken(true)}
           />
+        )}
+        {link && !broken && (
+          <button type="button" className="btn btn--sm prize-card__open" onClick={openPrizeLink}>
+            Открыть сертификат
+          </button>
         )}
         <p className="prize-card__text">«Ты дошла до 30. Это твой год»</p>
       </div>

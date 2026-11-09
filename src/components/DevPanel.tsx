@@ -3,7 +3,9 @@ import { LEVELS } from '@shared/levels';
 import { nextAvailableTask, tasksOfLevel } from '@shared/progress';
 import { api, ApiError, hasTelegramAuth } from '../api/client';
 import { readFileAsDataUrl } from '../lib/photo';
+import { decodeQrLink } from '../lib/qr';
 import { useProgressStore } from '../store/useProgressStore';
+import { impact, openExternalLink } from '../telegram/useTelegram';
 
 interface DevPanelProps {
   onClose: () => void;
@@ -24,6 +26,7 @@ export function DevPanel({ onClose }: DevPanelProps) {
   const [busy, setBusy] = useState(false);
   const [prizeNote, setPrizeNote] = useState<string | null>(null);
   const [prizePreview, setPrizePreview] = useState<string | null>(null);
+  const [prizeLink, setPrizeLink] = useState<string | null>(null);
   const prizeInput = useRef<HTMLInputElement>(null);
 
   const runServer = async (action: string, body?: unknown): Promise<boolean> => {
@@ -89,6 +92,9 @@ export function DevPanel({ onClose }: DevPanelProps) {
       // что QR действительно сохранился в D1.
       const saved = await api.prize();
       setPrizePreview(saved.image);
+      void decodeQrLink(saved.image)
+        .then((value) => setPrizeLink(value))
+        .catch(() => setPrizeLink(null));
       // Если экран приза уже открыт, он перезапросит картинку без перезагрузки.
       window.dispatchEvent(new Event('prize-updated'));
       setPrizeNote('QR-приз сохранён в базе. Победитель увидит его после открытия сундука.');
@@ -107,9 +113,13 @@ export function DevPanel({ onClose }: DevPanelProps) {
     try {
       const saved = await api.prize();
       setPrizePreview(saved.image);
+      void decodeQrLink(saved.image)
+        .then((value) => setPrizeLink(value))
+        .catch(() => setPrizeLink(null));
       setPrizeNote('QR-приз найден в базе.');
     } catch (error) {
       setPrizePreview(null);
+      setPrizeLink(null);
       setPrizeNote(
         error instanceof ApiError && error.code === 'prize_not_found'
           ? 'В базе пока нет QR-приза.'
@@ -222,6 +232,20 @@ export function DevPanel({ onClose }: DevPanelProps) {
             <div className="dev-prize">
               <img src={prizePreview} alt="Загруженный QR-приз" />
             </div>
+          )}
+
+          {prizeLink && (
+            <button
+              type="button"
+              className="btn btn--sm"
+              style={{ marginTop: 10 }}
+              onClick={() => {
+                impact('medium');
+                openExternalLink(prizeLink);
+              }}
+            >
+              Проверить переход по QR
+            </button>
           )}
 
           <p className="dev-note">
