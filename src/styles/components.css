@@ -192,6 +192,41 @@
   line-height: 1.5;
 }
 
+.accepted-photo {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.accepted-photo img {
+  display: block;
+  width: 100%;
+  max-height: 340px;
+  object-fit: contain;
+  border-radius: 14px;
+  background: #fff;
+  padding: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+
+.accepted-photo__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--c-text-muted);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.accepted-photo__score {
+  color: var(--c-gold-300);
+  font-family: var(--font-num);
+  font-size: 12px;
+}
+
 .sheet__meta {
   display: flex;
   flex-wrap: wrap;

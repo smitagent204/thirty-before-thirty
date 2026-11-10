@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import { LEVEL_BY_ID } from '@shared/levels';
 import type { AiVerdict, Task, TaskStatus } from '@shared/types';
 import { impact, notify } from '../telegram/useTelegram';
-import { api, ApiError, hasTelegramAuth } from '../api/client';
+import { api, ApiError, hasTelegramAuth, type PhotoResult } from '../api/client';
 import { compressPhoto } from '../lib/photo';
 import { ManualApprovalSheet } from './ManualApprovalSheet';
 
@@ -42,8 +42,29 @@ export function TaskDetailsSheet({
   const [fileName, setFileName] = useState<string | null>(null);
   const [verdict, setVerdict] = useState<AiVerdict | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
+  const [acceptedPhoto, setAcceptedPhoto] = useState<PhotoResult | null>(null);
   const timer = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Фиксируем на момент открытия: если сервер подтвердит задание, пока лист открыт,
+  // не переключаем интерфейс под руками — пользователь сам нажмёт «Забрать».
+  const [done] = useState(() => status === 'completed');
+
+  // Если задание уже выполнено, показываем фото, которое прошло проверку.
+  useEffect(() => {
+    if (!done || isManual || !hasTelegramAuth()) return;
+    let cancelled = false;
+    api
+      .photo(task.id)
+      .then((photo) => {
+        if (!cancelled) setAcceptedPhoto(photo);
+      })
+      .catch(() => {
+        // фото могло не сохраниться после ручного сброса — просто не показываем
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [done, isManual, task.id]);
 
   useEffect(() => {
     return () => {
@@ -148,10 +169,6 @@ export function TaskDetailsSheet({
     onClose();
   };
 
-  // Фиксируем на момент открытия: если сервер подтвердит задание, пока лист открыт,
-  // не переключаем интерфейс под руками — пользователь сам нажмёт «Забрать».
-  const [done] = useState(() => status === 'completed');
-
   return (
     <motion.div
       className="sheet-layer"
@@ -204,6 +221,17 @@ export function TaskDetailsSheet({
                     ? 'Задание засчитано вручную — фото не требовалось.'
                     : 'Фото проверено, баллы зачислены.'}
                 </p>
+                {!isManual && acceptedPhoto && (
+                  <div className="accepted-photo">
+                    <img src={acceptedPhoto.image} alt="Принятое фото" />
+                    <div className="accepted-photo__meta">
+                      <span>Принятое фото</span>
+                      <span className="accepted-photo__score">
+                        {acceptedPhoto.score}%
+                      </span>
+                    </div>
+                  </div>
+                )}
               </section>
             ) : (
               <>

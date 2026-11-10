@@ -30,6 +30,14 @@ export interface WifeState {
   configured: boolean;
 }
 
+export interface PhotoResult {
+  image: string;
+  score: number;
+  verdict: string;
+  confidence: number;
+  createdAt: string;
+}
+
 export class ApiError extends Error {
   status: number;
   code: string;
@@ -99,4 +107,7 @@ export const api = {
     }),
 
   wife: () => request<WifeState>('/api/dev/wife', { method: 'POST' }),
+
+  photo: (taskId: string) =>
+    request<PhotoResult>(`/api/tasks/${encodeURIComponent(taskId)}/photo`),
 };
