@@ -11,7 +11,8 @@ export const onRequestGet = async ({ request, env, params }: Ctx): Promise<Respo
 
   try {
     const row = await env.DB.prepare(
-      `SELECT mime, image, score, verdict, reason, confidence, deductions, created_at
+      `SELECT mime, image, score, verdict, reason, confidence, deductions,
+              appealed_at, appeal_prev_score, created_at
        FROM photos
        WHERE telegram_id = ? AND task_id = ?
        ORDER BY created_at DESC, rowid DESC
@@ -26,6 +27,8 @@ export const onRequestGet = async ({ request, env, params }: Ctx): Promise<Respo
         reason: string;
         confidence: number;
         deductions: string;
+        appealed_at: string | null;
+        appeal_prev_score: number | null;
         created_at: string;
       }>();
 
@@ -38,6 +41,8 @@ export const onRequestGet = async ({ request, env, params }: Ctx): Promise<Respo
       reason: row.reason,
       deductions: parseStoredDeductions(row.deductions),
       confidence: row.confidence,
+      appealedAt: row.appealed_at,
+      appealScoreBefore: row.appeal_prev_score,
       createdAt: row.created_at,
     });
   } catch {

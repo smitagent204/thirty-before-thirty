@@ -573,6 +573,103 @@
   line-height: 1.45;
 }
 
+/* Апелляция: пояснение в шторке задания и итог пересмотра. */
+.appeal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 12px;
+  border: 1px solid rgba(255, 215, 94, 0.16);
+  border-radius: var(--r-md);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.appeal-form__label {
+  color: var(--c-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.appeal-form__input {
+  width: 100%;
+  min-height: 92px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--r-sm);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--c-text);
+  font: inherit;
+  font-size: 13.5px;
+  line-height: 1.45;
+  resize: vertical;
+}
+
+.appeal-form__input:focus {
+  outline: none;
+  border-color: rgba(255, 215, 94, 0.55);
+  box-shadow: 0 0 0 2px rgba(255, 215, 94, 0.12);
+}
+
+.appeal-form__input::placeholder {
+  color: var(--c-text-muted);
+}
+
+.appeal-form__foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.appeal-form__counter {
+  color: var(--c-text-muted);
+  font-family: var(--font-num);
+  font-size: 11px;
+}
+
+.appeal-form__actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.appeal-form__hint {
+  margin: 0;
+  color: var(--c-text-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.appeal-form__error {
+  margin: 0;
+  color: #ff9c9c;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.appeal-note {
+  margin: 4px 0 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(99, 212, 113, 0.3);
+  border-radius: var(--r-md);
+  background: rgba(99, 212, 113, 0.07);
+  color: #cdebd1;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+
+.appeal-note__summary {
+  margin: 0 0 4px;
+  color: #e4ffe8;
+  font-weight: 600;
+}
+
+.appeal-note__text {
+  margin: 0;
+}
+
 /* ─────────────────────────── Chest ─────────────────────────── */
 
 .chest-screen {

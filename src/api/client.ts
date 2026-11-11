@@ -71,7 +71,25 @@ export interface PhotoResult {
   reason?: string;
   deductions?: AiDeduction[];
   confidence: number;
+  /** Когда фото оспорили; null — апелляция ещё доступна. */
+  appealedAt?: string | null;
+  /** Оценка до апелляции. */
+  appealScoreBefore?: number | null;
   createdAt: string;
+}
+
+export interface AppealResult {
+  taskId: string;
+  title: string;
+  scoreBefore: number;
+  score: number;
+  verdict: string;
+  reason: string;
+  deductions: AiDeduction[];
+  /** Сколько процентов удалось вернуть. */
+  relieved: number;
+  applied: 'full' | 'partial' | 'minimum';
+  appealedAt: string;
 }
 
 export interface WifeTaskState {
@@ -171,4 +189,10 @@ export const api = {
 
   photo: (taskId: string) =>
     request<PhotoResult>(`/api/tasks/${encodeURIComponent(taskId)}/photo`),
+
+  appeal: (taskId: string, text: string) =>
+    request<AppealResult>(`/api/tasks/${encodeURIComponent(taskId)}/appeal`, {
+      method: 'POST',
+      body: JSON.stringify({ text }),
+    }),
 };

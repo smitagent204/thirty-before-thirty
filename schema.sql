@@ -26,6 +26,10 @@ CREATE TABLE IF NOT EXISTS photos (
   reason TEXT NOT NULL,
   confidence REAL NOT NULL,
   deductions TEXT NOT NULL DEFAULT '[]',
+  -- Одна апелляция на фото: appealed_at != NULL означает, что попытка использована.
+  appealed_at TEXT,
+  appeal_text TEXT,
+  appeal_prev_score INTEGER,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import { LEVEL_BY_ID } from '@shared/levels';
-import type { AiDeduction, AiVerdict, Task, TaskStatus } from '@shared/types';
+import { APPEAL_MAX_CHARS, type AiDeduction, type AiVerdict, type Task, type TaskStatus } from '@shared/types';
 import { impact, notify } from '../telegram/useTelegram';
-import { api, ApiError, hasTelegramAuth, type PhotoResult } from '../api/client';
+import {
+  api,
+  ApiError,
+  hasTelegramAuth,
+  type AppealResult,
+  type PhotoResult,
+} from '../api/client';
 import { compressPhoto } from '../lib/photo';
 import { ManualApprovalSheet } from './ManualApprovalSheet';
 import { VerdictDetails } from './VerdictDetails';
@@ -52,6 +58,11 @@ export function TaskDetailsSheet({
     saved: boolean;
     previousScore: number | null;
   } | null>(null);
+  const [appealOpen, setAppealOpen] = useState(false);
+  const [appealText, setAppealText] = useState('');
+  const [appealBusy, setAppealBusy] = useState(false);
+  const [appealError, setAppealError] = useState<string | null>(null);
+  const [appealResult, setAppealResult] = useState<AppealResult | null>(null);
   const timer = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const serverAuth = hasTelegramAuth();
@@ -222,6 +233,65 @@ export function TaskDetailsSheet({
     }
   };
 
+  const startAppeal = () => {
+    setAppealOpen(true);
+    setAppealError(null);
+    setAppealResult(null);
+    impact('light');
+  };
+
+  const cancelAppeal = () => {
+    setAppealOpen(false);
+    setAppealError(null);
+  };
+
+  const submitAppeal = async () => {
+    const text = appealText.trim();
+    if (!text || appealBusy) return;
+    setAppealBusy(true);
+    setAppealError(null);
+    impact('medium');
+
+    try {
+      const result = await api.appeal(task.id, text);
+      setAppealResult(result);
+      setAppealOpen(false);
+      setAppealText('');
+      setAcceptedPhoto((prev) =>
+        prev
+          ? {
+              ...prev,
+              score: result.score,
+              verdict: result.verdict,
+              reason: result.reason,
+              deductions: result.deductions,
+              appealedAt: result.appealedAt,
+              appealScoreBefore: result.scoreBefore,
+            }
+          : prev,
+      );
+      notify('success');
+      await onChecked();
+    } catch (error) {
+      const message =
+        error instanceof ApiError
+          ? error.code === 'appeal_already_used'
+            ? 'Для этого фото апелляция уже использована.'
+            : error.code === 'nothing_to_appeal'
+              ? 'Снимать нечего: замечаний к фото нет.'
+              : error.code === 'appeal_too_long'
+                ? `Слишком длинное пояснение — максимум ${APPEAL_MAX_CHARS} символов.`
+                : error.code === 'ai_unavailable'
+                  ? 'Пересмотр временно недоступен. Попробуй позже — попытка не потрачена.'
+                  : 'Не удалось пересмотреть оценку. Попробуй ещё раз.'
+          : 'Не удалось отправить апелляцию. Проверь интернет и попробуй ещё раз.';
+      setAppealError(message);
+      notify('error');
+    } finally {
+      setAppealBusy(false);
+    }
+  };
+
   const startImprove = () => {
     setImproving(true);
     setImproveResult(null);
@@ -323,6 +393,82 @@ export function TaskDetailsSheet({
                       deductions={acceptedPhoto.deductions}
                       compact
                     />
+
+                    {appealResult ? (
+                      <div className="appeal-note appeal-note--result" aria-live="polite">
+                        <p className="appeal-note__summary">
+                          Результат пересмотрен: {appealResult.scoreBefore}% →{' '}
+                          {appealResult.score}%
+                        </p>
+                        <p className="appeal-note__text">{appealResult.reason}</p>
+                      </div>
+                    ) : acceptedPhoto.appealedAt ? (
+                      <p className="appeal-note">
+                        Апелляция рассмотрена
+                        {typeof acceptedPhoto.appealScoreBefore === 'number'
+                          ? ` · было ${acceptedPhoto.appealScoreBefore}%`
+                          : ''}
+                      </p>
+                    ) : (acceptedPhoto.deductions?.length ?? 0) > 0 ? (
+                      appealOpen ? (
+                        <div className="appeal-form">
+                          <label
+                            className="appeal-form__label"
+                            htmlFor={`appeal-${task.id}`}
+                          >
+                            Почему снижение несправедливо?
+                          </label>
+                          <textarea
+                            id={`appeal-${task.id}`}
+                            className="appeal-form__input"
+                            value={appealText}
+                            maxLength={APPEAL_MAX_CHARS}
+                            rows={4}
+                            placeholder="1–3 предложения: что именно видно на фото и почему замечание не подходит."
+                            onChange={(event) => setAppealText(event.target.value)}
+                            disabled={appealBusy}
+                          />
+                          <div className="appeal-form__foot">
+                            <span className="appeal-form__counter">
+                              {appealText.length} / {APPEAL_MAX_CHARS}
+                            </span>
+                            <div className="appeal-form__actions">
+                              <button
+                                type="button"
+                                className="btn btn--ghost btn--sm"
+                                onClick={cancelAppeal}
+                                disabled={appealBusy}
+                              >
+                                Отмена
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn--sm"
+                                onClick={() => void submitAppeal()}
+                                disabled={!appealText.trim() || appealBusy}
+                              >
+                                {appealBusy ? 'Пересматриваем…' : 'Отправить'}
+                              </button>
+                            </div>
+                          </div>
+                          <p className="appeal-form__hint">
+                            Апелляция для одного фото — один раз. Оценка может только
+                            вырасти.
+                          </p>
+                          {appealError && (
+                            <p className="appeal-form__error">{appealError}</p>
+                          )}
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className="btn btn--ghost btn--sm"
+                          onClick={startAppeal}
+                        >
+                          ✍️ Оспорить снижение баллов
+                        </button>
+                      )
+                    ) : null}
                   </div>
                 )}
                 {improveResult && (

@@ -1,6 +1,8 @@
 import {
+  buildAppealPrompt,
   buildVerificationPrompt,
   buildVerdictPrompt,
+  type AppealClaim,
   type PreviousAttempt,
 } from '../../shared/aiPrompt';
 import type { AiDeduction, AiVerdict, Task, TaskRequirement } from '../../shared/types';
@@ -294,6 +296,62 @@ function parseVerification(text: string): Verification {
   return { checks, reason };
 }
 
+interface AppealAnswer {
+  /** Сколько процентных пунктов штрафа вернуть. */
+  reduce?: number;
+  /** Резервный формат, если модель ответила состояниями. */
+  state?: CheckState;
+}
+
+/**
+ * Разбирает ответ на апелляцию. Главное поле — reduce: любое целое от 0
+ * до текущего штрафа, а не только «снять всё» или «оставить половину».
+ */
+function parseAppealResponse(text: string): {
+  answers: Map<string, AppealAnswer>;
+  reason: string | null;
+} {
+  const answers = new Map<string, AppealAnswer>();
+  let reason: string | null = null;
+  const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end <= start) return { answers, reason };
+
+  try {
+    const raw = JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>;
+    if (typeof raw.reason === 'string') reason = raw.reason.slice(0, 300).trim() || null;
+    if (!Array.isArray(raw.checks)) return { answers, reason };
+
+    for (const entry of raw.checks) {
+      if (!entry || typeof entry !== 'object') continue;
+      const value = entry as Record<string, unknown>;
+      const id = typeof value.id === 'string' ? value.id.trim() : '';
+      if (!id) continue;
+
+      const rawReduce = Number(value.reduce ?? value.refund ?? value.relief);
+      const reduce = Number.isFinite(rawReduce) ? Math.round(rawReduce) : undefined;
+
+      const stateRaw = typeof value.state === 'string' ? value.state.toLowerCase() : '';
+      const state: CheckState | null =
+        stateRaw === 'ok' || stateRaw === 'visible' || stateRaw === 'done'
+          ? 'ok'
+          : stateRaw === 'partial' || stateRaw === 'частично'
+            ? 'partial'
+            : stateRaw === 'missing' || stateRaw === 'нет' || stateRaw === 'отсутствует'
+              ? 'missing'
+              : null;
+
+      if (reduce === undefined && !state) continue;
+      answers.set(id, { reduce, state: state ?? undefined });
+    }
+  } catch {
+    // Битый ответ — ниже сработает гарантированный минимум.
+  }
+
+  return { answers, reason };
+}
+
 /**
  * Второй проход по тем же минусам. Если проверяющий видит предмет, минус
  * снимается: лучше недосчитать, чем незаслуженно провалить хорошее фото.
@@ -331,6 +389,109 @@ async function verifyDeductions(
   } catch {
     return null;
   }
+}
+
+const APPEAL_MIN_RELIEF = 1;
+
+export type AppealApplied = 'full' | 'partial' | 'minimum';
+
+export interface AppealOutcome extends AiVerdict {
+  /** Сколько процентов удалось вернуть. */
+  relieved: number;
+  /** full — все минусы сняты, partial — часть, minimum — гарантированный 1%. */
+  applied: AppealApplied;
+}
+
+function totalPercent(items: AiDeduction[]): number {
+  return items.reduce((sum, item) => sum + item.percent, 0);
+}
+
+/** Уменьшает самые крупные минусы, пока сумма не дойдёт до цели. */
+function trimDeductions(items: AiDeduction[], target: number): AiDeduction[] {
+  const next = items.map((item) => ({ ...item }));
+  let total = totalPercent(next);
+  const order = [...next].sort((a, b) => b.percent - a.percent);
+
+  for (const item of order) {
+    if (total <= target) break;
+    const cut = Math.min(item.percent, total - target);
+    item.percent -= cut;
+    total -= cut;
+  }
+
+  return next.filter((item) => item.percent > 0);
+}
+
+/**
+ * Апелляция: человек просит пересмотреть все минусы разом. По каждому пункту
+ * модель возвращает reduce — сколько процентных пунктов вернуть. Это может быть
+ * любое число от 0 до текущего штрафа: не только «снять всё» или «половину».
+ * Новые минусы и рост штрафа невозможны, а минимум 1% возвращается всегда —
+ * единственная попытка не должна сгорать впустую.
+ */
+export async function appealVerdict(
+  env: Env,
+  task: Task,
+  image: string,
+  current: AiDeduction[],
+  note: string,
+): Promise<AppealOutcome> {
+  const claims: AppealClaim[] = current.map((item, index) => ({
+    id: item.id ?? `item-${index}`,
+    label: item.label,
+    percent: item.percent,
+  }));
+
+  const { answers, reason } = parseAppealResponse(
+    await runVision(env, buildAppealPrompt(task, claims, note), image),
+  );
+
+  const reduced: AiDeduction[] = [];
+  current.forEach((item, index) => {
+    const answer = answers.get(claims[index].id);
+    let relief = 0;
+    if (answer?.reduce !== undefined) {
+      relief = answer.reduce;
+    } else if (answer?.state === 'ok') {
+      relief = item.percent;
+    } else if (answer?.state === 'partial') {
+      relief = Math.max(1, Math.round(item.percent / 2));
+    }
+
+    // Модель не может вернуть больше, чем было списано, или уйти в минус.
+    relief = Math.max(0, Math.min(item.percent, relief));
+    const percent = item.percent - relief;
+    if (percent > 0) reduced.push({ ...item, percent });
+  });
+
+  const before = totalPercent(current);
+  let next = reduced;
+  let after = totalPercent(next);
+  let applied: AppealApplied = after === 0 ? 'full' : after < before ? 'partial' : 'minimum';
+
+  if (before > 0 && after > before - APPEAL_MIN_RELIEF) {
+    next = trimDeductions(next, Math.max(0, before - APPEAL_MIN_RELIEF));
+    after = totalPercent(next);
+    applied = 'minimum';
+  }
+
+  const score = Math.max(0, Math.min(100, 100 - after));
+  const fallback =
+    applied === 'full'
+      ? 'Спасибо за пояснение — замечания сняты, баллы восстановлены.'
+      : applied === 'partial'
+        ? 'Спасибо за пояснение — часть замечаний снята, оценка стала выше.'
+        : 'Спасибо за пояснение. Полностью снять замечание не удалось, но я уменьшил штраф.';
+
+  return {
+    score,
+    verdict: score >= PASS_SCORE ? 'pass' : 'fail',
+    reason: reason ?? fallback,
+    confidence: 0.75,
+    deductions: next,
+    relieved: before - after,
+    applied,
+  };
 }
 
 /** Единая проверка фото для обычной загрузки, повторной попытки и переоценки. */

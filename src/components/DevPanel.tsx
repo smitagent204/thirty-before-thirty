@@ -539,6 +539,15 @@ export function DevPanel({ onClose }: DevPanelProps) {
                         compact
                         onDismiss={(item) => void dismissDeduction(inspectTask.id, item)}
                       />
+                      {inspectState.photo.appealedAt && (
+                        <p className="dev-note" style={{ marginTop: 8 }}>
+                          Апелляция рассмотрена
+                          {typeof inspectState.photo.appealScoreBefore === 'number'
+                            ? ` · было ${inspectState.photo.appealScoreBefore}%`
+                            : ''}
+                          .
+                        </p>
+                      )}
                       {(inspectState.photo.deductions?.length ?? 0) > 0 && (
                         <p className="dev-note" style={{ marginTop: 8 }}>
                           Если ИИ ошибся, нажми × у минуса — оценка пересчитается.

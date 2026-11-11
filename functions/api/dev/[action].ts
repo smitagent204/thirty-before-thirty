@@ -123,7 +123,8 @@ async function wifeTask(ctx: Ctx): Promise<Response> {
   }
 
   const photo = await ctx.env.DB.prepare(
-    `SELECT mime, image, score, verdict, reason, confidence, deductions, created_at
+    `SELECT mime, image, score, verdict, reason, confidence, deductions,
+            appealed_at, appeal_prev_score, created_at
      FROM photos
      WHERE telegram_id = ? AND task_id = ?
      ORDER BY created_at DESC, rowid DESC
@@ -138,6 +139,8 @@ async function wifeTask(ctx: Ctx): Promise<Response> {
       reason: string;
       confidence: number;
       deductions: string;
+      appealed_at: string | null;
+      appeal_prev_score: number | null;
       created_at: string;
     }>();
 
@@ -153,6 +156,8 @@ async function wifeTask(ctx: Ctx): Promise<Response> {
           reason: photo.reason,
           deductions: parseStoredDeductions(photo.deductions),
           confidence: photo.confidence,
+          appealedAt: photo.appealed_at,
+          appealScoreBefore: photo.appeal_prev_score,
           createdAt: photo.created_at,
         }
       : null,

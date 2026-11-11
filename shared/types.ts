@@ -83,3 +83,6 @@ export interface AiVerdict {
   /** Разбивка разницы до 100 %: чего не хватило и на сколько процентов. */
   deductions?: AiDeduction[];
 }
+
+/** Максимум символов в пояснении к апелляции: хватает на 1–3 предложения. */
+export const APPEAL_MAX_CHARS = 500;
