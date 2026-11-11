@@ -852,7 +852,8 @@ button {
   overflow-y: hidden;
   scroll-snap-type: x mandatory;
   overscroll-behavior-x: contain;
-  -webkit-overflow-scrolling: touch;
+  /* Без legacy -webkit-overflow-scrolling: он ломает hit-testing 3D-карточек. */
+  touch-action: pan-x;
   scrollbar-width: none;
   perspective: 1100px;
   perspective-origin: 50% 45%;
@@ -901,6 +902,9 @@ button {
   transform-origin: 50% 50%;
   will-change: transform, opacity;
   cursor: pointer;
+  /* Без задержки на двойной тап и без контекстного меню по долгому нажатию. */
+  touch-action: manipulation;
+  -webkit-touch-callout: none;
   transition: border-color var(--d-base), box-shadow var(--d-base);
 }
 

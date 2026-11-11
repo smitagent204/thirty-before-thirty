@@ -235,6 +235,19 @@ export function HallOfFame({
     [loadEntry],
   );
 
+  const lastOpenRef = useRef(0);
+
+  /** Единая точка входа: тап и click не должны открыть задание дважды. */
+  const openTask = useCallback(
+    (task: Task) => {
+      const now = Date.now();
+      if (now - lastOpenRef.current < 700) return;
+      lastOpenRef.current = now;
+      onOpenTask(task);
+    },
+    [onOpenTask],
+  );
+
   const updateCards = () => {
     const viewport = viewportRef.current;
     if (!viewport) return;
@@ -356,6 +369,53 @@ export function HallOfFame({
       settle = window.setTimeout(settleScroll, 170);
     };
 
+    // В WKWebView (Telegram на iOS) click по карточке внутри 3D-скроллера часто
+    // не доходит до кнопки вообще или приходит на соседнюю копию. Поэтому тап
+    // распознаём по pointer-событиям, а карточку ищем по геометрии слотов,
+    // а не по DOM-цели события.
+    let tap: { x: number; y: number; at: number } | null = null;
+
+    const insideViewport = (x: number, y: number) => {
+      const rect = viewport.getBoundingClientRect();
+      return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+    };
+
+    const onPointerDown = (event: PointerEvent) => {
+      if (event.pointerType === 'mouse') return;
+      if (!insideViewport(event.clientX, event.clientY)) return;
+      tap = { x: event.clientX, y: event.clientY, at: Date.now() };
+    };
+
+    const onPointerUp = (event: PointerEvent) => {
+      if (event.pointerType === 'mouse') return;
+      const start = tap;
+      tap = null;
+      if (!start) return;
+      // Палец проехал — это свайп по ленте, а не нажатие.
+      if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 12) return;
+      if (Date.now() - start.at > 900) return;
+
+      for (let index = 0; index < slotRefs.current.length; index += 1) {
+        const slot = slotRefs.current[index];
+        if (!slot) continue;
+        const rect = slot.getBoundingClientRect();
+        if (
+          event.clientX >= rect.left &&
+          event.clientX <= rect.right &&
+          event.clientY >= rect.top &&
+          event.clientY <= rect.bottom
+        ) {
+          const card = HALL_CARDS[index];
+          if (card) openTask(card.task);
+          return;
+        }
+      }
+    };
+
+    const onPointerCancel = () => {
+      tap = null;
+    };
+
     // Начинаем с первой карточки первого уровня в средней копии.
     if (!initialised.current) {
       initialised.current = true;
@@ -365,14 +425,22 @@ export function HallOfFame({
 
     updateCards();
     viewport.addEventListener('scroll', onScroll, { passive: true });
+    // Слушаем на window: если WKWebView из-за 3D-трансформации промахнётся
+    // целью события, тап всё равно будет пойман и сопоставлен по координатам.
+    window.addEventListener('pointerdown', onPointerDown, { passive: true });
+    window.addEventListener('pointerup', onPointerUp, { passive: true });
+    window.addEventListener('pointercancel', onPointerCancel);
     window.addEventListener('resize', schedule);
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
       if (settle) window.clearTimeout(settle);
       viewport.removeEventListener('scroll', onScroll);
+      window.removeEventListener('pointerdown', onPointerDown);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerCancel);
       window.removeEventListener('resize', schedule);
     };
-  }, [loading, completed]);
+  }, [loading, completed, openTask]);
 
   const doneCount = TASKS.filter((task) => completed.includes(task.id)).length;
 
@@ -412,7 +480,7 @@ export function HallOfFame({
                 completed={completed.includes(task.id)}
                 manual={manualCompleted.includes(task.id)}
                 loadEntry={loadEntryCached}
-                onOpenTask={onOpenTask}
+                onOpenTask={openTask}
                 scrollRoot={viewportRef}
                 onRef={(cardIndex, node) => {
                   slotRefs.current[cardIndex] = node;

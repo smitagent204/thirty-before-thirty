@@ -193,6 +193,10 @@ export default function App() {
 
   const openHall = () => {
     impact('light');
+    // Повторное нажатие на счётчик уже внутри аллеи не должно заново включать
+    // загрузку: эффект ниже не перезапустится (view не меняется), и спиннер
+    // останется навсегда.
+    if (view === 'hall') return;
     markHallIntroSeen();
     if (devActive && serverAuth) setHallWifeLoading(true);
     setView('hall');
@@ -203,12 +207,12 @@ export default function App() {
     setView('tasks');
   };
 
-  const handleHallTask = (task: Task) => {
+  const handleHallTask = useCallback((task: Task) => {
     impact('light');
     setTab(task.level);
     setView('tasks');
     setFocusTaskId(task.id);
-  };
+  }, []);
 
   const clearFocus = useCallback(() => setFocusTaskId(null), []);
 
