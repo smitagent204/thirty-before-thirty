@@ -370,22 +370,22 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  padding: 18px 0 28px;
+  padding: 8px 0 18px;
   text-align: center;
 }
 
 .chest-title {
-  margin: 4px 0 4px;
+  margin: 0 0 2px;
   font-family: var(--font-display);
-  font-size: 24px;
+  font-size: 22px;
   letter-spacing: 0.03em;
 }
 
 .chest-sub {
-  margin: 0 0 16px;
-  max-width: 30ch;
+  margin: 0 0 10px;
+  max-width: 32ch;
   color: var(--c-text-muted);
-  font-size: 13px;
+  font-size: 12.5px;
 }
 
 .chest-stage {
@@ -393,11 +393,23 @@
   display: grid;
   place-items: center;
   width: 100%;
-  min-height: 292px;
+  min-height: 268px;
   perspective: 700px;
   /* Свечение и частицы шире коробки сундука — не даём им
      создавать горизонтальный скролл на узких экранах. */
   overflow-x: clip;
+}
+
+/* На экране сундука важнее уместить кнопку без прокрутки,
+   поэтому прогресс и обратный отсчёт здесь компактнее. */
+.chest-screen .roadmap {
+  margin-bottom: 8px;
+  padding-top: 8px;
+  padding-bottom: 9px;
+}
+
+.chest-screen .roadmap__head {
+  margin-bottom: 6px;
 }
 
 .chest {
@@ -991,4 +1003,26 @@
   color: var(--c-text-muted);
   font-size: 14px;
   line-height: 1.5;
+}
+
+/* На невысоких экранах дополнительно поджимаем сундук,
+   чтобы кнопка оставалась видимой без прокрутки. */
+@media (max-height: 720px) {
+  .chest-title {
+    font-size: 20px;
+  }
+
+  .chest-sub {
+    margin-bottom: 8px;
+  }
+
+  .chest-stage:not(.chest-stage--prize) {
+    min-height: 216px;
+  }
+
+  .chest-screen .roadmap {
+    margin-bottom: 6px;
+    padding-top: 6px;
+    padding-bottom: 7px;
+  }
 }
