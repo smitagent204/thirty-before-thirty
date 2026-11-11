@@ -365,7 +365,7 @@ export function DevPanel({ onClose }: DevPanelProps) {
                           {'error' in row
                             ? `Ошибка: ${row.error}`
                             : `${row.oldScore}% → ${row.newScore}%${
-                                row.improved ? ' ↑' : ''
+                                row.improved ? ' ↑' : row.newScore < row.oldScore ? ' ↓' : ''
                               } · ${row.reason}`}
                         </span>
                       </div>

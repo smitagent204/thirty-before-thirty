@@ -62,9 +62,16 @@ export interface TaskProgress {
   lastScore?: number;
 }
 
+export interface AiDeduction {
+  label: string;
+  percent: number;
+}
+
 export interface AiVerdict {
   score: number;
   verdict: 'pass' | 'fail';
   reason: string;
   confidence: number;
+  /** Разбивка разницы до 100 %: чего не хватило и на сколько процентов. */
+  deductions?: AiDeduction[];
 }

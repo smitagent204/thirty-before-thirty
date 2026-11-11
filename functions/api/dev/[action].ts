@@ -187,12 +187,9 @@ async function recheckWifeTask(ctx: Ctx): Promise<Response> {
   if (!photo) return json({ error: 'photo_not_found' }, 404);
 
   try {
-    const verdict = await evaluatePhoto(
-      ctx.env,
-      task,
-      `data:${photo.mime};base64,${photo.image}`,
-      { score: photo.score, reason: photo.reason },
-    );
+    // Переоценка — это свежий взгляд по новым правилам, без привязки к старому
+    // баллу: иначе модель просто повторяет прежнюю оценку.
+    const verdict = await evaluatePhoto(ctx.env, task, `data:${photo.mime};base64,${photo.image}`);
 
     await ctx.env.DB.prepare(
       `UPDATE photos
