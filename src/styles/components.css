@@ -412,6 +412,59 @@
   margin-bottom: 6px;
 }
 
+/* Финальный экран: поднимаем карточку с QR и поджимаем текст,
+   чтобы вся мотивация помещалась без прокрутки. */
+.chest-screen--open {
+  padding-top: 4px;
+}
+
+.chest-screen--open .chest-title {
+  font-size: 20px;
+}
+
+.chest-screen--open .chest-sub {
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.chest-screen--open .prize-wrap {
+  padding-top: 0;
+}
+
+.chest-screen--open .prize-card {
+  padding: 12px 14px;
+}
+
+.chest-screen--open .prize-card__label {
+  margin-bottom: 8px;
+}
+
+.chest-screen--open .prize-card__qr,
+.chest-screen--open .prize-card__qr-missing {
+  max-width: 224px;
+}
+
+.chest-screen--open .prize-card__qr {
+  padding: 8px;
+}
+
+.chest-screen--open .prize-card__open {
+  max-width: 224px;
+  margin-top: 10px;
+}
+
+.chest-screen--open .prize-card__text {
+  margin-top: 10px;
+  font-size: 20px;
+}
+
+.chest-screen--open .motivation {
+  max-width: 42ch;
+  margin-top: 10px;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
 .chest {
   position: relative;
   width: 218px;
@@ -526,7 +579,7 @@
 
 .chest.is-shaking {
   /* Три отдельных «толчка» с паузами между ними. */
-  animation: chest-shake 0.33s ease-in-out 3;
+  animation: chest-shake 0.5s ease-in-out 3;
 }
 
 .particle {

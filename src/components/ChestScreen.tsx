@@ -84,10 +84,10 @@ export function ChestScreen({
     const first = window.setTimeout(() => {
       setPhase('opening');
       notify('warning');
-    }, 1000);
+    }, 1500);
     const second = window.setTimeout(() => {
       void finish();
-    }, 2400);
+    }, 2800);
     timers.current.push(first, second);
   };
 
@@ -112,7 +112,7 @@ export function ChestScreen({
 
   return (
     <div className="screen">
-      <div className="chest-screen">
+      <div className={`chest-screen${phase === 'open' ? ' chest-screen--open' : ''}`}>
         <h2 className="chest-title">Сундук тридцати</h2>
         <p className="chest-sub">
           {phase === 'open'
