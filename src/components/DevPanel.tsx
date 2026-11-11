@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { LEVELS } from '@shared/levels';
 import { nextAvailableTask, tasksOfLevel } from '@shared/progress';
-import { api, ApiError, hasTelegramAuth } from '../api/client';
+import type { Task } from '@shared/types';
+import { api, ApiError, hasTelegramAuth, type WifeTaskState } from '../api/client';
 import { readFileAsDataUrl } from '../lib/photo';
 import { decodeQrLink } from '../lib/qr';
 import { useProgressStore } from '../store/useProgressStore';
@@ -29,6 +30,10 @@ export function DevPanel({ onClose }: DevPanelProps) {
   const [prizeLink, setPrizeLink] = useState<string | null>(null);
   const [wifeCompleted, setWifeCompleted] = useState<string[]>([]);
   const [wifeConfigured, setWifeConfigured] = useState<boolean | null>(null);
+  const [inspectTask, setInspectTask] = useState<Task | null>(null);
+  const [inspectState, setInspectState] = useState<WifeTaskState | null>(null);
+  const [inspectError, setInspectError] = useState<string | null>(null);
+  const [inspectLoading, setInspectLoading] = useState(false);
   const prizeInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -147,6 +152,21 @@ export function DevPanel({ onClose }: DevPanelProps) {
       );
     } finally {
       setBusy(false);
+    }
+  };
+
+  const openWifeTask = async (task: Task) => {
+    if (!serverMode) return;
+    setInspectTask(task);
+    setInspectState(null);
+    setInspectError(null);
+    setInspectLoading(true);
+    try {
+      setInspectState(await api.wifeTask(task.id));
+    } catch {
+      setInspectError('Не удалось загрузить данные задания.');
+    } finally {
+      setInspectLoading(false);
     }
   };
 
@@ -289,7 +309,11 @@ export function DevPanel({ onClose }: DevPanelProps) {
                   const isDone = completed.includes(task.id);
                   return (
                     <div className="dev-row" key={task.id}>
-                      <div className="dev-row__main">
+                      <button
+                        type="button"
+                        className="dev-row__main dev-row__main--clickable"
+                        onClick={() => void openWifeTask(task)}
+                      >
                         {wifeCompleted.includes(task.id) && (
                           <span
                             className="dev-row__wife-dot"
@@ -298,10 +322,10 @@ export function DevPanel({ onClose }: DevPanelProps) {
                           />
                         )}
                         {task.title}
-                        <div className="dev-row__sub">
+                        <span className="dev-row__sub">
                           {task.id} · +{task.points}
-                        </div>
-                      </div>
+                        </span>
+                      </button>
                       <button
                         type="button"
                         className={`dev-row__check${isDone ? ' is-done' : ''}`}
@@ -325,6 +349,99 @@ export function DevPanel({ onClose }: DevPanelProps) {
           </button>
         </div>
       </div>
+
+      {inspectTask && (
+        <div className="sheet-layer sheet-layer--nested">
+          <div className="scrim" onClick={() => setInspectTask(null)} />
+          <div className="sheet sheet--compact">
+            <div className="sheet__handle" />
+            <div className="sheet__head">
+              <div className="sheet__head-text">
+                <div className="sheet__eyebrow">
+                  <span
+                    className="rarity"
+                    style={
+                      {
+                        '--rarity': '#ff8fc7',
+                        '--rarity-light': '#ffd0e6',
+                      } as CSSProperties
+                    }
+                  >
+                    прогресс жены
+                  </span>
+                </div>
+                <h3 className="sheet__title">{inspectTask.title}</h3>
+              </div>
+              <button
+                type="button"
+                className="sheet__close"
+                onClick={() => setInspectTask(null)}
+                aria-label="Закрыть"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="sheet__body">
+              {inspectLoading && <p className="sheet__hint">Загружаем…</p>}
+              {inspectError && <p className="sheet__hint">{inspectError}</p>}
+
+              {!inspectLoading && !inspectError && inspectState && !inspectState.completed && (
+                <p className="sheet__hint">Жена ещё не выполняла это задание.</p>
+              )}
+
+              {!inspectLoading && inspectState?.completed && (
+                <>
+                  <p className="sheet__hint">
+                    {inspectState.manual
+                      ? 'Засчитано вручную, фото нет.'
+                      : inspectState.photo
+                        ? `Проверено ИИ: ${inspectState.photo.score}%.`
+                        : 'Задание выполнено, но фото не сохранилось.'}
+                    {inspectState.createdAt && (
+                      <>
+                        {' '}
+                        Дата выполнения: {formatDateTime(inspectState.createdAt)}.
+                      </>
+                    )}
+                  </p>
+
+                  {inspectState.photo?.reason && (
+                    <p className="sheet__hint" style={{ marginTop: 10 }}>
+                      Комментарий ИИ: {inspectState.photo.reason}
+                    </p>
+                  )}
+
+                  {inspectState.photo?.image && (
+                    <div className="accepted-photo">
+                      <img src={inspectState.photo.image} alt="Фото выполненного задания" />
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+
+            <div className="sheet__footer">
+              <button type="button" className="btn" onClick={() => setInspectTask(null)}>
+                Закрыть
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+function formatDateTime(value: string): string {
+  const iso = value.includes('T') ? value : `${value.replace(' ', 'T')}Z`;
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('ru-RU', {
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
 }

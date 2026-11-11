@@ -12,8 +12,18 @@ interface ToggleBody {
   taskId?: string;
 }
 
+interface WifeTaskBody {
+  taskId?: string;
+}
+
 interface PrizeBody {
   image?: string;
+}
+
+function getWifeId(env: Ctx['env']): number | null {
+  const raw = env.USER_TELEGRAM_ID?.trim();
+  const telegramId = raw ? Number(raw) : NaN;
+  return raw && Number.isFinite(telegramId) && telegramId > 0 ? telegramId : null;
 }
 
 const MAX_PRIZE_BASE64 = 1_500_000;
@@ -71,9 +81,8 @@ async function toggle(ctx: Ctx, telegramId: number): Promise<Response> {
 
 /** Прогресс второго пользователя — чтобы владелец видел его в dev-панели. */
 async function wifeState(ctx: Ctx): Promise<Response> {
-  const raw = ctx.env.USER_TELEGRAM_ID?.trim();
-  const telegramId = raw ? Number(raw) : NaN;
-  if (!raw || !Number.isFinite(telegramId) || telegramId <= 0) {
+  const telegramId = getWifeId(ctx.env);
+  if (!telegramId) {
     return json({
       completed: [],
       manualCompleted: [],
@@ -84,6 +93,62 @@ async function wifeState(ctx: Ctx): Promise<Response> {
 
   const state = await loadState(ctx.env, telegramId);
   return json({ ...state, configured: true });
+}
+
+/** Детали задания жены: дата выполнения, фото и комментарий ИИ. */
+async function wifeTask(ctx: Ctx): Promise<Response> {
+  const body = await readJson<WifeTaskBody>(ctx.request);
+  const task = body?.taskId ? TASK_BY_ID.get(body.taskId) : undefined;
+  if (!task) return json({ error: 'task_not_found' }, 404);
+
+  const telegramId = getWifeId(ctx.env);
+  if (!telegramId) return json({ error: 'wife_not_configured' }, 400);
+
+  const completion = await ctx.env.DB.prepare(
+    `SELECT manual, created_at
+     FROM completions
+     WHERE telegram_id = ? AND task_id = ?`,
+  )
+    .bind(telegramId, task.id)
+    .first<{ manual: number; created_at: string }>();
+
+  if (!completion) {
+    return json({ completed: false, manual: false, createdAt: null, photo: null });
+  }
+
+  const photo = await ctx.env.DB.prepare(
+    `SELECT mime, image, score, verdict, reason, confidence, created_at
+     FROM photos
+     WHERE telegram_id = ? AND task_id = ?
+     ORDER BY created_at DESC
+     LIMIT 1`,
+  )
+    .bind(telegramId, task.id)
+    .first<{
+      mime: string;
+      image: string;
+      score: number;
+      verdict: string;
+      reason: string;
+      confidence: number;
+      created_at: string;
+    }>();
+
+  return json({
+    completed: true,
+    manual: completion.manual === 1,
+    createdAt: completion.created_at,
+    photo: photo
+      ? {
+          image: `data:${photo.mime};base64,${photo.image}`,
+          score: photo.score,
+          verdict: photo.verdict,
+          reason: photo.reason,
+          confidence: photo.confidence,
+          createdAt: photo.created_at,
+        }
+      : null,
+  });
 }
 
 async function reset(ctx: Ctx, telegramId: number): Promise<Response> {
@@ -135,6 +200,8 @@ export const onRequestPost = async (ctx: Ctx): Promise<Response> => {
         return await reset(ctx, auth.user.id);
       case 'wife':
         return await wifeState(ctx);
+      case 'wife-task':
+        return await wifeTask(ctx);
       case 'prize':
         return await savePrize(ctx);
       default:

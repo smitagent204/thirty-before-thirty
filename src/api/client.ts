@@ -34,8 +34,16 @@ export interface PhotoResult {
   image: string;
   score: number;
   verdict: string;
+  reason?: string;
   confidence: number;
   createdAt: string;
+}
+
+export interface WifeTaskState {
+  completed: boolean;
+  manual: boolean;
+  createdAt: string | null;
+  photo: PhotoResult | null;
 }
 
 export class ApiError extends Error {
@@ -107,6 +115,12 @@ export const api = {
     }),
 
   wife: () => request<WifeState>('/api/dev/wife', { method: 'POST' }),
+
+  wifeTask: (taskId: string) =>
+    request<WifeTaskState>('/api/dev/wife-task', {
+      method: 'POST',
+      body: JSON.stringify({ taskId }),
+    }),
 
   photo: (taskId: string) =>
     request<PhotoResult>(`/api/tasks/${encodeURIComponent(taskId)}/photo`),

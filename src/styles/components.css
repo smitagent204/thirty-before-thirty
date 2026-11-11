@@ -690,7 +690,19 @@
   min-width: 0;
 }
 
+.dev-row__main--clickable {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
 .dev-row__sub {
+  display: block;
   color: var(--c-text-muted);
   font-size: 11px;
 }
