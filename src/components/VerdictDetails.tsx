@@ -4,10 +4,17 @@ interface VerdictDetailsProps {
   reason?: string;
   deductions?: AiDeduction[];
   compact?: boolean;
+  /** Только для dev-панели: убрать конкретный минус, если ИИ ошибся. */
+  onDismiss?: (item: AiDeduction) => void;
 }
 
 /** Похвала отдельно от списка минусов: так оценка читается спокойно и честно. */
-export function VerdictDetails({ reason, deductions, compact }: VerdictDetailsProps) {
+export function VerdictDetails({
+  reason,
+  deductions,
+  compact,
+  onDismiss,
+}: VerdictDetailsProps) {
   const items = deductions ?? [];
   if (!reason && items.length === 0) return null;
 
@@ -23,6 +30,17 @@ export function VerdictDetails({ reason, deductions, compact }: VerdictDetailsPr
             >
               <span className="verdict-details__percent">−{item.percent}%</span>
               <span className="verdict-details__label">{item.label}</span>
+              {onDismiss && (
+                <button
+                  type="button"
+                  className="verdict-details__dismiss"
+                  onClick={() => onDismiss(item)}
+                  aria-label={`Убрать минус: ${item.label}`}
+                  title="ИИ ошибся — убрать этот минус"
+                >
+                  ×
+                </button>
+              )}
             </li>
           ))}
         </ul>

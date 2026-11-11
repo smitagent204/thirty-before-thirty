@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { LEVELS } from '@shared/levels';
 import { nextAvailableTask, tasksOfLevel } from '@shared/progress';
 import { TASK_BY_ID } from '@shared/tasks';
-import type { Task } from '@shared/types';
+import type { AiDeduction, Task } from '@shared/types';
 import {
   api,
   ApiError,
@@ -210,6 +210,29 @@ export function DevPanel({ onClose }: DevPanelProps) {
     setRechecking(false);
   };
 
+  const dismissDeduction = async (taskId: string, item: AiDeduction) => {
+    if (!serverMode) return;
+    try {
+      const result = await api.dismissWifeDeduction(taskId, item.id ?? item.label);
+      setInspectState((prev) =>
+        prev?.photo
+          ? {
+              ...prev,
+              photo: {
+                ...prev.photo,
+                score: result.score,
+                verdict: result.verdict,
+                reason: result.reason,
+                deductions: result.deductions,
+              },
+            }
+          : prev,
+      );
+    } catch {
+      // Если не удалось — оставляем как было, без лишнего шума.
+    }
+  };
+
   const exitDev = () => {
     setForceFail(false);
     setDevMode(false);
@@ -358,27 +381,44 @@ export function DevPanel({ onClose }: DevPanelProps) {
 
               {recheckRows.length > 0 && (
                 <div className="dev-list" style={{ marginTop: 10 }}>
-                  {recheckRows.map((row) => (
-                    <div className="dev-row" key={row.taskId}>
-                      <div className="dev-row__main">
-                        {row.title}
-                        <span className="dev-row__sub">
-                          {'error' in row
-                            ? `Ошибка: ${row.error}`
-                            : `${row.oldScore}% → ${row.newScore}%${
-                                row.improved ? ' ↑' : row.newScore < row.oldScore ? ' ↓' : ''
-                              } · ${row.reason}`}
-                        </span>
-                        {!('error' in row) && row.deductions && row.deductions.length > 0 && (
-                          <span className="dev-row__sub dev-row__sub--misses">
-                            {row.deductions
-                              .map((item) => `−${item.percent}% — ${item.label}`)
-                              .join('; ')}
+                  {recheckRows.map((row) => {
+                    if ('error' in row) {
+                      return (
+                        <div className="dev-row" key={row.taskId}>
+                          <div className="dev-row__main">
+                            {row.title}
+                            <span className="dev-row__sub">Ошибка: {row.error}</span>
+                          </div>
+                        </div>
+                      );
+                    }
+
+                    const misses = row.kept
+                      ? row.candidateDeductions ?? []
+                      : row.deductions;
+
+                    return (
+                      <div className="dev-row" key={row.taskId}>
+                        <div className="dev-row__main">
+                          {row.title}
+                          <span className="dev-row__sub">
+                            {`${row.oldScore}% → ${row.newScore}%${
+                              row.improved ? ' ↑' : row.newScore < row.oldScore ? ' ↓' : ''
+                            }`}
+                            {row.kept ? ' · оставили прежнюю оценку' : ` · ${row.reason}`}
                           </span>
-                        )}
+                          {misses.length > 0 && (
+                            <span className="dev-row__sub dev-row__sub--misses">
+                              {row.kept ? 'Новая проверка предлагала: ' : ''}
+                              {misses
+                                .map((item) => `−${item.percent}% — ${item.label}`)
+                                .join('; ')}
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -497,7 +537,13 @@ export function DevPanel({ onClose }: DevPanelProps) {
                         reason={inspectState.photo.reason}
                         deductions={inspectState.photo.deductions}
                         compact
+                        onDismiss={(item) => void dismissDeduction(inspectTask.id, item)}
                       />
+                      {(inspectState.photo.deductions?.length ?? 0) > 0 && (
+                        <p className="dev-note" style={{ marginTop: 8 }}>
+                          Если ИИ ошибся, нажми × у минуса — оценка пересчитается.
+                        </p>
+                      )}
                     </div>
                   )}
 

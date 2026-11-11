@@ -17,6 +17,11 @@ interface WifeTaskBody {
   taskId?: string;
 }
 
+interface DismissBody {
+  taskId?: string;
+  deductionId?: string;
+}
+
 interface PrizeBody {
   image?: string;
 }
@@ -194,6 +199,25 @@ async function recheckWifeTask(ctx: Ctx): Promise<Response> {
     // баллу: иначе модель просто повторяет прежнюю оценку.
     const verdict = await evaluatePhoto(ctx.env, task, `data:${photo.mime};base64,${photo.image}`);
 
+    // Ранее принятое фото не проваливаем задним числом: если новая проверка
+    // ниже порога, оставляем прежнюю оценку и показываем кандидата в отчёте.
+    if (photo.verdict === 'pass' && verdict.verdict === 'fail') {
+      return json({
+        taskId: task.id,
+        title: task.title,
+        oldScore: photo.score,
+        newScore: verdict.score,
+        oldVerdict: photo.verdict,
+        verdict: photo.verdict,
+        reason: photo.reason,
+        deductions: parseStoredDeductions(photo.deductions),
+        improved: false,
+        kept: true,
+        candidateReason: verdict.reason,
+        candidateDeductions: verdict.deductions ?? [],
+      });
+    }
+
     await ctx.env.DB.prepare(
       `UPDATE photos
        SET score = ?, verdict = ?, reason = ?, confidence = ?, deductions = ?
@@ -223,6 +247,57 @@ async function recheckWifeTask(ctx: Ctx): Promise<Response> {
   } catch {
     return json({ error: 'ai_unavailable' }, 502);
   }
+}
+
+/** Владелец может убрать конкретный минус, если ИИ ошибся. */
+async function dismissWifeDeduction(ctx: Ctx): Promise<Response> {
+  const body = await readJson<DismissBody>(ctx.request);
+  const task = body?.taskId ? TASK_BY_ID.get(body.taskId) : undefined;
+  const deductionId = body?.deductionId?.trim();
+  if (!task || !deductionId) return json({ error: 'invalid_request' }, 400);
+
+  const telegramId = getWifeId(ctx.env);
+  if (!telegramId) return json({ error: 'wife_not_configured' }, 400);
+
+  const photo = await ctx.env.DB.prepare(
+    `SELECT id, score, verdict, reason, deductions
+     FROM photos
+     WHERE telegram_id = ? AND task_id = ?
+     ORDER BY created_at DESC, rowid DESC
+     LIMIT 1`,
+  )
+    .bind(telegramId, task.id)
+    .first<{
+      id: string;
+      score: number;
+      verdict: string;
+      reason: string;
+      deductions: string;
+    }>();
+  if (!photo) return json({ error: 'photo_not_found' }, 404);
+
+  const list = parseStoredDeductions(photo.deductions);
+  const next = list.filter((item) => (item.id ?? item.label) !== deductionId);
+  if (next.length === list.length) return json({ error: 'deduction_not_found' }, 404);
+
+  const total = next.reduce((sum, item) => sum + item.percent, 0);
+  const score = Math.max(0, 100 - total);
+  const verdict = score >= 70 ? 'pass' : 'fail';
+
+  await ctx.env.DB.prepare(
+    'UPDATE photos SET score = ?, verdict = ?, deductions = ? WHERE id = ?',
+  )
+    .bind(score, verdict, JSON.stringify(next), photo.id)
+    .run();
+
+  return json({
+    taskId: task.id,
+    title: task.title,
+    score,
+    verdict,
+    reason: photo.reason,
+    deductions: next,
+  });
 }
 
 async function reset(ctx: Ctx, telegramId: number): Promise<Response> {
@@ -278,6 +353,8 @@ export const onRequestPost = async (ctx: Ctx): Promise<Response> => {
         return await wifeTask(ctx);
       case 'recheck-wife-task':
         return await recheckWifeTask(ctx);
+      case 'dismiss-wife-deduction':
+        return await dismissWifeDeduction(ctx);
       case 'prize':
         return await savePrize(ctx);
       default:

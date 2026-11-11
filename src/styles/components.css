@@ -524,6 +524,26 @@
   color: var(--c-text-muted);
 }
 
+.verdict-details__dismiss {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  margin-left: auto;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--c-text-muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.verdict-details__dismiss:hover {
+  border-color: rgba(255, 255, 255, 0.32);
+  color: var(--c-text);
+}
+
 .verdict--pass .verdict-details__label {
   color: #cdebd1;
 }

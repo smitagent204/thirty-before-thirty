@@ -34,6 +34,19 @@ export interface RecheckResult {
   reason: string;
   deductions: AiDeduction[];
   improved: boolean;
+  /** Новый прогон оказался ниже порога — оставили прежнюю принятую оценку. */
+  kept?: boolean;
+  candidateReason?: string;
+  candidateDeductions?: AiDeduction[];
+}
+
+export interface DismissResult {
+  taskId: string;
+  title: string;
+  score: number;
+  verdict: string;
+  reason: string;
+  deductions: AiDeduction[];
 }
 
 export interface ManualResult extends ServerState {
@@ -148,6 +161,12 @@ export const api = {
     request<RecheckResult>('/api/dev/recheck-wife-task', {
       method: 'POST',
       body: JSON.stringify({ taskId }),
+    }),
+
+  dismissWifeDeduction: (taskId: string, deductionId: string) =>
+    request<DismissResult>('/api/dev/dismiss-wife-deduction', {
+      method: 'POST',
+      body: JSON.stringify({ taskId, deductionId }),
     }),
 
   photo: (taskId: string) =>

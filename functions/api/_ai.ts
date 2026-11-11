@@ -1,4 +1,8 @@
-import { buildVerdictPrompt, type PreviousAttempt } from '../../shared/aiPrompt';
+import {
+  buildVerificationPrompt,
+  buildVerdictPrompt,
+  type PreviousAttempt,
+} from '../../shared/aiPrompt';
 import type { AiDeduction, AiVerdict, Task, TaskRequirement } from '../../shared/types';
 import type { Env } from './_shared';
 
@@ -248,6 +252,87 @@ async function runVision(env: Env, prompt: string, image: string): Promise<strin
   throw lastError ?? new Error('empty_ai_response');
 }
 
+type CheckState = 'ok' | 'partial' | 'missing';
+
+interface Verification {
+  checks: Map<string, CheckState>;
+  reason: string | null;
+}
+
+function parseVerification(text: string): Verification {
+  const checks = new Map<string, CheckState>();
+  let reason: string | null = null;
+  const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end <= start) return { checks, reason };
+
+  try {
+    const raw = JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>;
+    if (typeof raw.reason === 'string') reason = raw.reason.slice(0, 300).trim() || null;
+    if (!Array.isArray(raw.checks)) return { checks, reason };
+
+    for (const entry of raw.checks) {
+      if (!entry || typeof entry !== 'object') continue;
+      const value = entry as Record<string, unknown>;
+      const id = typeof value.id === 'string' ? value.id.trim() : '';
+      const stateRaw = typeof value.state === 'string' ? value.state.toLowerCase() : '';
+      const state: CheckState | null =
+        stateRaw === 'ok' || stateRaw === 'visible' || stateRaw === 'done'
+          ? 'ok'
+          : stateRaw === 'partial' || stateRaw === 'частично'
+            ? 'partial'
+            : stateRaw === 'missing' || stateRaw === 'нет' || stateRaw === 'отсутствует'
+              ? 'missing'
+              : null;
+      if (id && state) checks.set(id, state);
+    }
+  } catch {
+    // Пустой или битый ответ — просто не применяем перепроверку.
+  }
+
+  return { checks, reason };
+}
+
+/**
+ * Второй проход по тем же минусам. Если проверяющий видит предмет, минус
+ * снимается: лучше недосчитать, чем незаслуженно провалить хорошее фото.
+ */
+async function verifyDeductions(
+  env: Env,
+  task: Task,
+  image: string,
+  deductions: AiDeduction[],
+): Promise<{ deductions: RawDeduction[]; reason: string | null } | null> {
+  const claims = deductions
+    .filter((item): item is AiDeduction & { id: string } => Boolean(item.id))
+    .map((item) => {
+      const requirement = task.rubric.required.find((entry) => entry.id === item.id);
+      // Проверяем формулировку требования, а не текст минуса: «бренды не читаются»
+      // нельзя перепроверить как «чего не хватает».
+      return { id: item.id, label: requirement?.label ?? item.label };
+    });
+  if (claims.length === 0) return null;
+
+  try {
+    const { checks, reason } = parseVerification(
+      await runVision(env, buildVerificationPrompt(task, claims), image),
+    );
+    if (checks.size === 0) return null;
+
+    const verified: RawDeduction[] = [];
+    for (const claim of claims) {
+      const state = checks.get(claim.id);
+      // Нет вердикта по пункту — не считаем его доказанным минусом.
+      if (!state || state === 'ok') continue;
+      verified.push({ id: claim.id, state });
+    }
+    return { deductions: verified, reason };
+  } catch {
+    return null;
+  }
+}
+
 /** Единая проверка фото для обычной загрузки, повторной попытки и переоценки. */
 export async function evaluatePhoto(
   env: Env,
@@ -280,5 +365,22 @@ export async function evaluatePhoto(
     }
   }
 
-  return buildVerdict(task, raw);
+  let verdict = buildVerdict(task, raw);
+
+  // Второй проход только по заявленным минусам: убирает ложные «нет объекта»,
+  // когда предмет на самом деле есть, но модель его не заметила.
+  if (!raw.invalid && verdict.deductions && verdict.deductions.length > 0) {
+    const verified = await verifyDeductions(env, task, image, verdict.deductions);
+    if (verified) {
+      raw = {
+        ...raw,
+        deductions: verified.deductions,
+        allVisible: verified.deductions.length === 0,
+        reason: verified.reason ?? raw.reason,
+      };
+      verdict = buildVerdict(task, raw);
+    }
+  }
+
+  return verdict;
 }
