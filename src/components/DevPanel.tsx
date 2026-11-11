@@ -34,6 +34,7 @@ export function DevPanel({ onClose }: DevPanelProps) {
   const setForceFail = useProgressStore((state) => state.setForceFail);
   const setDevMode = useProgressStore((state) => state.setDevMode);
   const hydrate = useProgressStore((state) => state.hydrate);
+  const showHallIntro = useProgressStore((state) => state.showHallIntro);
 
   const serverMode = hasTelegramAuth();
   const [busy, setBusy] = useState(false);
@@ -49,7 +50,17 @@ export function DevPanel({ onClose }: DevPanelProps) {
   const [inspectState, setInspectState] = useState<WifeTaskState | null>(null);
   const [inspectError, setInspectError] = useState<string | null>(null);
   const [inspectLoading, setInspectLoading] = useState(false);
+  const [introOnExit, setIntroOnExit] = useState(false);
   const prizeInput = useRef<HTMLInputElement>(null);
+
+  /** Чекбокс одноразовый: при закрытии панели показывает обучение и сам сбрасывается. */
+  const closePanel = () => {
+    if (introOnExit) {
+      showHallIntro();
+      setIntroOnExit(false);
+    }
+    onClose();
+  };
 
   useEffect(() => {
     if (!serverMode) return;
@@ -236,12 +247,12 @@ export function DevPanel({ onClose }: DevPanelProps) {
   const exitDev = () => {
     setForceFail(false);
     setDevMode(false);
-    onClose();
+    closePanel();
   };
 
   return (
     <div className="sheet-layer">
-      <div className="scrim" onClick={onClose} />
+      <div className="scrim" onClick={closePanel} />
       <div className="sheet" style={{ maxHeight: '92%' }}>
         <div className="sheet__handle" />
         <div className="sheet__head">
@@ -258,7 +269,7 @@ export function DevPanel({ onClose }: DevPanelProps) {
             </div>
             <h3 className="sheet__title">Панель разработчика</h3>
           </div>
-          <button type="button" className="sheet__close" onClick={onClose} aria-label="Закрыть">
+          <button type="button" className="sheet__close" onClick={closePanel} aria-label="Закрыть">
             ✕
           </button>
         </div>
@@ -296,6 +307,19 @@ export function DevPanel({ onClose }: DevPanelProps) {
             >
               Сбросить прогресс
             </button>
+            <label className="dev-check">
+              <input
+                type="checkbox"
+                checked={introOnExit}
+                onChange={(event) => setIntroOnExit(event.target.checked)}
+              />
+              <span>
+                Показать подсказку об аллее после закрытия панели
+                <span className="dev-check__hint">
+                  Сбросится автоматически, когда подсказка появится
+                </span>
+              </span>
+            </label>
             {serverMode && (
               <>
                 <button
@@ -469,7 +493,7 @@ export function DevPanel({ onClose }: DevPanelProps) {
         </div>
 
         <div className="sheet__footer">
-          <button type="button" className="btn" onClick={onClose}>
+          <button type="button" className="btn" onClick={closePanel}>
             Готово
           </button>
         </div>

@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react';
+import { useEffect, type CSSProperties } from 'react';
 import type { LevelMeta, Task, TaskStatus } from '@shared/types';
 import { levelMaxPoints, computeLevelPoints, tasksOfLevel } from '@shared/progress';
 import { ProgressRoadmap } from '../components/ProgressRoadmap';
@@ -9,6 +9,9 @@ interface LevelScreenProps {
   level: LevelMeta;
   completed: string[];
   statuses: Map<string, TaskStatus>;
+  /** Задание, к которому нужно прокрутить и подсветить после аллеи славы. */
+  focusTaskId?: string | null;
+  onFocusHandled?: () => void;
   onOpenTask: (task: Task) => void;
   onLocked: (task: Task) => void;
 }
@@ -17,6 +20,8 @@ export function LevelScreen({
   level,
   completed,
   statuses,
+  focusTaskId,
+  onFocusHandled,
   onOpenTask,
   onLocked,
 }: LevelScreenProps) {
@@ -25,6 +30,22 @@ export function LevelScreen({
   const points = computeLevelPoints(level.id, completed);
   const ready = points >= max;
   const vars = RARITY_VARS[level.rarity];
+
+  useEffect(() => {
+    if (!focusTaskId) return;
+    const node = document.getElementById(`task-${focusTaskId}`);
+    const frame = node
+      ? window.requestAnimationFrame(() => {
+          node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        })
+      : null;
+    // Подсветка живёт 2,6 с — этого хватает, чтобы понять, куда привела карточка.
+    const timer = window.setTimeout(() => onFocusHandled?.(), 2600);
+    return () => {
+      if (frame !== null) window.cancelAnimationFrame(frame);
+      window.clearTimeout(timer);
+    };
+  }, [focusTaskId, level.id, onFocusHandled]);
 
   const style = {
     '--level-gradient': `var(${vars.gradient})`,
@@ -65,6 +86,7 @@ export function LevelScreen({
               <TaskCard
                 task={task}
                 status={statuses.get(task.id) ?? 'locked'}
+                highlighted={focusTaskId === task.id}
                 onOpen={onOpenTask}
                 onLocked={onLocked}
               />

@@ -1119,6 +1119,37 @@
   color: var(--c-success);
 }
 
+.dev-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--c-text);
+  font-size: 12.5px;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.dev-check input {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin: 1px 0 0;
+  accent-color: var(--c-gold-400);
+  cursor: pointer;
+}
+
+.dev-check__hint {
+  display: block;
+  margin-top: 3px;
+  color: var(--c-text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .dev-note {
   margin: 12px 0 0;
   color: var(--c-text-muted);

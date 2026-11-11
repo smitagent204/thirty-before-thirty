@@ -11,6 +11,7 @@ import {
   type PhotoResult,
 } from '../api/client';
 import { compressPhoto } from '../lib/photo';
+import { invalidatePhoto, loadPhoto } from '../api/photoCache';
 import { ManualApprovalSheet } from './ManualApprovalSheet';
 import { VerdictDetails } from './VerdictDetails';
 
@@ -94,8 +95,7 @@ export function TaskDetailsSheet({
   useEffect(() => {
     if (!done || !serverAuth) return;
     let cancelled = false;
-    api
-      .photo(task.id)
+    loadPhoto(task.id)
       .then((photo) => {
         if (!cancelled) setAcceptedPhoto(photo);
       })
@@ -175,6 +175,8 @@ export function TaskDetailsSheet({
         confidence: result.confidence,
       });
       if (result.pass) {
+        // Сервер мог сохранить новый кадр — старый из кэша больше не нужен.
+        invalidatePhoto(task.id);
         setPhase('pass');
         notify('success');
 
@@ -191,8 +193,7 @@ export function TaskDetailsSheet({
               createdAt: new Date().toISOString(),
             });
             // Подтягиваем серверную запись, чтобы дата и данные были точными.
-            void api
-              .photo(task.id)
+            void loadPhoto(task.id)
               .then((photo) => setAcceptedPhoto(photo))
               .catch(() => {});
           }
@@ -254,6 +255,8 @@ export function TaskDetailsSheet({
 
     try {
       const result = await api.appeal(task.id, text);
+      // Оценка и минусы изменились — старое фото в кэше больше не актуально.
+      invalidatePhoto(task.id);
       setAppealResult(result);
       setAppealOpen(false);
       setAppealText('');

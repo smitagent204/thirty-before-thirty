@@ -17,6 +17,8 @@ interface ProgressState {
   chestOpened: boolean;
   devMode: boolean;
   forceFail: boolean;
+  /** Показывалась ли подсказка «счётчик ведёт на аллею славы». */
+  hallIntroSeen: boolean;
   /** Пришло с сервера: владелец может пользоваться dev-панелью */
   isOwner: boolean;
   hydrate: (state: HydrateState) => void;
@@ -28,6 +30,9 @@ interface ProgressState {
   openChest: () => void;
   setDevMode: (value: boolean) => void;
   setForceFail: (value: boolean) => void;
+  markHallIntroSeen: () => void;
+  /** Показать обучающую подсказку у счётчика ещё раз. */
+  showHallIntro: () => void;
 }
 
 const ALL_TASK_IDS = TASKS.map((task) => task.id);
@@ -40,6 +45,7 @@ export const useProgressStore = create<ProgressState>()(
       chestOpened: false,
       devMode: isDevRequested(),
       forceFail: false,
+      hallIntroSeen: false,
       isOwner: false,
 
       hydrate: (state) =>
@@ -85,6 +91,8 @@ export const useProgressStore = create<ProgressState>()(
       openChest: () => set({ chestOpened: true }),
       setDevMode: (value) => set({ devMode: value }),
       setForceFail: (value) => set({ forceFail: value }),
+      markHallIntroSeen: () => set({ hallIntroSeen: true }),
+      showHallIntro: () => set({ hallIntroSeen: false }),
     }),
     {
       name: 'thirty-progress-v1',
@@ -93,6 +101,7 @@ export const useProgressStore = create<ProgressState>()(
         manualCompleted: state.manualCompleted,
         chestOpened: state.chestOpened,
         devMode: state.devMode,
+        hallIntroSeen: state.hallIntroSeen,
       }),
     },
   ),

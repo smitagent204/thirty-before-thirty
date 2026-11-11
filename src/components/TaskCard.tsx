@@ -5,6 +5,8 @@ import type { Rarity, Task, TaskStatus } from '@shared/types';
 interface TaskCardProps {
   task: Task;
   status: TaskStatus;
+  /** После перехода из аллеи славы карточка кратко подсвечивается. */
+  highlighted?: boolean;
   onOpen: (task: Task) => void;
   onLocked: (task: Task) => void;
 }
@@ -22,7 +24,7 @@ export const RARITY_VARS: Record<Rarity, { base: string; light: string; gradient
   legendary: { base: '--c-legend', light: '--c-legend-light', gradient: '--g-legend' },
 };
 
-export function TaskCard({ task, status, onOpen, onLocked }: TaskCardProps) {
+export function TaskCard({ task, status, highlighted, onOpen, onLocked }: TaskCardProps) {
   const level = LEVEL_BY_ID.get(task.level);
   const rarity = level?.rarity ?? 'common';
   const vars = RARITY_VARS[rarity];
@@ -40,7 +42,8 @@ export function TaskCard({ task, status, onOpen, onLocked }: TaskCardProps) {
   return (
     <button
       type="button"
-      className={`task-card is-${status}`}
+      id={`task-${task.id}`}
+      className={`task-card is-${status}${highlighted ? ' is-flash' : ''}`}
       style={style}
       onClick={handleClick}
       aria-disabled={status === 'locked'}

@@ -5,9 +5,19 @@ import { CountdownMini } from './Countdown';
 interface HeaderProps {
   points: number;
   onUnlockDev: () => void;
+  onOpenHall: () => void;
+  /** Первый запуск: подсказка, что счётчик стал кликабельным. */
+  hallIntro: boolean;
+  hallActive: boolean;
 }
 
-export function Header({ points, onUnlockDev }: HeaderProps) {
+export function Header({
+  points,
+  onUnlockDev,
+  onOpenHall,
+  hallIntro,
+  hallActive,
+}: HeaderProps) {
   const timer = useRef<number | null>(null);
 
   const start = () => {
@@ -23,7 +33,7 @@ export function Header({ points, onUnlockDev }: HeaderProps) {
   };
 
   return (
-    <header className="header">
+    <header className={`header${hallIntro ? ' header--intro' : ''}`}>
       <div className="header__row">
         <div
           className="brand"
@@ -38,15 +48,29 @@ export function Header({ points, onUnlockDev }: HeaderProps) {
             <p className="brand__sub">путь к тридцати</p>
           </div>
         </div>
-        <div className="score" aria-label={`${points} из ${TOTAL_POINTS} баллов`}>
+        <button
+          type="button"
+          className="score score--button"
+          onClick={onOpenHall}
+          aria-label={`${points} из ${TOTAL_POINTS} баллов. Открыть аллею славы`}
+          aria-current={hallActive ? 'page' : undefined}
+        >
           <span aria-hidden="true">✦</span>
           {points}
           <span className="score__total">/ {TOTAL_POINTS}</span>
-        </div>
+        </button>
       </div>
       <div className="header__row" style={{ marginTop: 6 }}>
         <CountdownMini />
       </div>
+      {hallIntro && (
+        <div className="hall-intro-cue" role="status">
+          <span className="hall-intro__finger" aria-hidden="true">
+            👆
+          </span>
+          <p className="hall-intro__hint">Нажми на счётчик — там аллея славы</p>
+        </div>
+      )}
     </header>
   );
 }

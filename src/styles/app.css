@@ -35,6 +35,7 @@ button {
 /* ─────────────────────────── App shell ─────────────────────────── */
 
 .app {
+  --hall-card-w: clamp(200px, 58vw, 280px);
   position: relative;
   display: flex;
   flex-direction: column;
@@ -147,6 +148,24 @@ button {
   color: var(--c-text-muted);
   font-family: var(--font-body);
   font-size: 11px;
+}
+
+.score--button {
+  cursor: pointer;
+  transition:
+    border-color var(--d-base),
+    background var(--d-base),
+    box-shadow var(--d-base),
+    transform var(--d-fast) var(--e-out);
+}
+
+.score--button:active {
+  transform: scale(0.95);
+}
+
+.score--button[aria-current='page'] {
+  border-color: rgba(255, 215, 94, 0.7);
+  background: rgba(146, 94, 24, 0.5);
 }
 
 /* ─────────────────────────── Countdown ─────────────────────────── */
@@ -586,6 +605,23 @@ button {
   background: linear-gradient(90deg, transparent, var(--c-success), transparent);
 }
 
+/* Подсветка карточки, к которой привела аллея славы. */
+.task-card.is-flash {
+  border-color: rgba(255, 215, 94, 0.75);
+  animation: task-flash 1.15s ease-in-out 2;
+}
+
+@keyframes task-flash {
+  0%,
+  100% {
+    box-shadow: var(--sh-card), 0 0 0 0 rgba(255, 215, 94, 0);
+  }
+  45% {
+    box-shadow: var(--sh-card), 0 0 0 3px rgba(255, 215, 94, 0.65),
+      0 0 30px rgba(255, 215, 94, 0.32);
+  }
+}
+
 /* ─────────────────────────── Ornament divider ─────────────────────────── */
 
 .ornament {
@@ -751,11 +787,357 @@ button {
   }
 }
 
+/* ─────────────────────────── Hall of fame ─────────────────────────── */
+
+.hall {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.hall__head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+  padding: 14px var(--content-pad) 4px;
+}
+
+.hall__back {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255, 215, 94, 0.28);
+  border-radius: 50%;
+  background: rgba(107, 66, 18, 0.28);
+  color: var(--c-gold-100);
+  font-size: 18px;
+  cursor: pointer;
+}
+
+.hall__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 21px;
+  letter-spacing: 0.04em;
+}
+
+.hall__sub {
+  margin: 2px 0 0;
+  color: var(--c-text-muted);
+  font-size: 10.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.hall__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  color: var(--c-text-muted);
+  font-size: 13px;
+}
+
+.hall__viewport {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  perspective: 1100px;
+  perspective-origin: 50% 45%;
+}
+
+.hall__viewport::-webkit-scrollbar {
+  display: none;
+}
+
+.hall__track {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  height: 100%;
+  padding: 8px calc(50% - var(--hall-card-w) / 2) 16px;
+  transform-style: preserve-3d;
+}
+
+/* Слот — неподвижная точка привязки: scroll-snap считает по нему, а не по
+   карточке, которую двигает coverflow-трансформация. */
+.hall-card-slot {
+  position: relative;
+  flex: 0 0 var(--hall-card-w);
+  width: var(--hall-card-w);
+  height: min(56vh, 470px);
+  max-height: calc(100% - 32px);
+  scroll-snap-align: center;
+  scroll-snap-stop: always;
+  transform-style: preserve-3d;
+}
+
+.hall-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 1px solid rgba(255, 215, 94, 0.22);
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, rgba(43, 30, 18, 0.96), rgba(20, 14, 9, 0.98));
+  color: var(--c-text);
+  text-align: left;
+  overflow: hidden;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.55);
+  transform-origin: 50% 50%;
+  will-change: transform, opacity;
+  cursor: pointer;
+  transition: border-color var(--d-base), box-shadow var(--d-base);
+}
+
+.hall-card:active {
+  border-color: rgba(255, 215, 94, 0.5);
+}
+
+.hall-card.is-locked {
+  border-color: rgba(255, 255, 255, 0.08);
+  background: linear-gradient(180deg, rgba(30, 28, 26, 0.96), rgba(16, 14, 12, 0.98));
+}
+
+.hall-card__frame {
+  position: relative;
+  flex: 0 0 58%;
+  min-height: 0;
+  background: #0d0a07;
+  overflow: hidden;
+}
+
+.hall-card__frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.hall-card__placeholder,
+.hall-card__mystery {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+}
+
+.hall-card__placeholder {
+  font-size: 54px;
+}
+
+.hall-card__mystery {
+  background: radial-gradient(60% 60% at 50% 45%, rgba(255, 255, 255, 0.06), transparent 70%);
+}
+
+.hall-card__mystery span {
+  display: grid;
+  place-items: center;
+  width: 132px;
+  height: 132px;
+  border: 2px dashed rgba(255, 255, 255, 0.1);
+  border-radius: 50%;
+  color: #4a453f;
+  font-family: var(--font-display);
+  font-size: 96px;
+  line-height: 1;
+  text-shadow:
+    0 2px 0 rgba(255, 255, 255, 0.06),
+    0 -2px 0 rgba(0, 0, 0, 0.5);
+}
+
+.hall-card__score {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 215, 94, 0.35);
+  border-radius: var(--r-pill);
+  background: rgba(11, 8, 5, 0.78);
+  color: var(--c-gold-100);
+  font-family: var(--font-num);
+  font-size: 11px;
+}
+
+.hall-card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 12px 14px 14px;
+}
+
+.hall-card__eyebrow {
+  color: var(--c-text-muted);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.hall-card__title {
+  display: -webkit-box;
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: 16px;
+  line-height: 1.2;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.hall-card.is-locked .hall-card__title {
+  color: #7d7a76;
+}
+
+.hall-card__praise {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--c-text);
+  font-size: 12px;
+  line-height: 1.45;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+}
+
+.hall-card__praise--muted {
+  color: var(--c-text-muted);
+}
+
+.hall-card__date {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+  color: var(--c-text-muted);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+
+.hall__footer {
+  flex: 0 0 auto;
+  padding: 8px var(--content-pad) calc(16px + var(--safe-bottom));
+}
+
+/* Первый запуск: затемняем всё, кроме счётчика, и показываем пальчик. */
+.hall-intro {
+  position: absolute;
+  inset: 0;
+  z-index: 50;
+  background: rgba(6, 4, 2, 0.82);
+  backdrop-filter: blur(2px);
+}
+
+/* Подсказка живёт в шапке (она выше затемнения), поэтому не прячется под ним. */
+.hall-intro-cue {
+  position: absolute;
+  top: 100%;
+  right: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  margin-top: 2px;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.hall-intro__finger {
+  font-size: 34px;
+  line-height: 1;
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.6));
+  animation: hall-finger 1.6s ease-in-out infinite;
+  transform-origin: bottom center;
+}
+
+.hall-intro__hint {
+  max-width: 214px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid rgba(255, 215, 94, 0.26);
+  border-radius: 12px;
+  background: rgba(20, 14, 9, 0.92);
+  color: var(--c-gold-100);
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.header--intro {
+  z-index: 70;
+  background: linear-gradient(180deg, rgba(20, 14, 9, 0.55), rgba(20, 14, 9, 0.32));
+  border-bottom-color: transparent;
+  backdrop-filter: none;
+}
+
+.header--intro .brand,
+.header--intro .countdown {
+  opacity: 0.18;
+  pointer-events: none;
+}
+
+.header--intro .score {
+  animation: hall-score 1.7s ease-in-out infinite;
+  border-color: rgba(255, 215, 94, 0.8);
+  box-shadow:
+    0 0 0 4px rgba(255, 215, 94, 0.14),
+    0 0 28px rgba(255, 215, 94, 0.4);
+}
+
+@keyframes hall-finger {
+  0%,
+  100% {
+    transform: translateY(0) rotate(-12deg) scale(1);
+  }
+  50% {
+    transform: translateY(-10px) rotate(-12deg) scale(1.08);
+  }
+}
+
+@keyframes hall-score {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.06);
+  }
+}
+
+@media (max-height: 720px) {
+  .hall-card-slot {
+    height: min(62vh, 430px);
+  }
+  .hall-card__frame {
+    flex-basis: 52%;
+  }
+  .hall-card__praise {
+    -webkit-line-clamp: 3;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .roadmap__fill::after,
   .roadmap__chest.is-ready,
   .task-card.is-available,
-  .tab--ready .tab__icon {
+  .tab--ready .tab__icon,
+  .task-card.is-flash,
+  .hall-intro__finger,
+  .header--intro .score {
     animation: none;
   }
 }

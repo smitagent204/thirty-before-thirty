@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { LEVELS, LEVEL_BY_ID, TOTAL_POINTS } from '@shared/levels';
 import { computePoints, computeStatuses, tasksOfLevel } from '@shared/progress';
@@ -6,13 +6,15 @@ import { TASK_BY_ID } from '@shared/tasks';
 import type { LevelId, Task } from '@shared/types';
 import { Header } from './components/Header';
 import { TabBar } from './components/TabBar';
+import { HallOfFame, type GalleryEntry } from './components/HallOfFame';
 import { LevelScreen } from './screens/LevelScreen';
 import { TaskDetailsSheet } from './components/TaskDetailsSheet';
 import { ChestScreen } from './components/ChestScreen';
 import { DevPanel } from './components/DevPanel';
 import { useProgressStore } from './store/useProgressStore';
 import { impact, useTelegram } from './telegram/useTelegram';
-import { api, ApiError } from './api/client';
+import { api, ApiError, type WifeState } from './api/client';
+import { loadPhoto, warmPhotos } from './api/photoCache';
 import { MANUAL_APPROVAL_PIN } from './config';
 
 function firstAvailableLevel(completed: string[]): LevelId {
@@ -38,10 +40,16 @@ export default function App() {
   const setDevMode = useProgressStore((state) => state.setDevMode);
   const hydrate = useProgressStore((state) => state.hydrate);
   const isOwner = useProgressStore((state) => state.isOwner);
+  const hallIntroSeen = useProgressStore((state) => state.hallIntroSeen);
+  const markHallIntroSeen = useProgressStore((state) => state.markHallIntroSeen);
 
   const [tab, setTab] = useState<LevelId | 'chest'>(() =>
     firstAvailableLevel(useProgressStore.getState().completed),
   );
+  const [view, setView] = useState<'tasks' | 'hall'>('tasks');
+  const [focusTaskId, setFocusTaskId] = useState<string | null>(null);
+  const [hallWife, setHallWife] = useState<WifeState | null>(null);
+  const [hallWifeLoading, setHallWifeLoading] = useState(false);
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [devOpen, setDevOpen] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
@@ -93,6 +101,81 @@ export default function App() {
   const chestPreview = devActive && !chestReady;
   const chestUnlocked = chestReady || chestPreview;
 
+  // В dev-режиме аллея показывает достижения жены, а не владельца.
+  const showWifeHall = Boolean(devActive && serverAuth && hallWife?.configured);
+  const hallLoading = devActive && serverAuth && hallWifeLoading;
+
+  // Фото выполненных заданий один раз догружаем в фоне. Дальше и шторка задания,
+  // и аллея славы берут их из общего кэша — без повторных запросов.
+  useEffect(() => {
+    if (!serverAuth) return;
+    const photoTaskIds = completed.filter((id) => !manualCompleted.includes(id));
+    if (photoTaskIds.length > 0) warmPhotos(photoTaskIds);
+  }, [completed, manualCompleted, serverAuth]);
+
+  useEffect(() => {
+    if (view !== 'hall' || !devActive || !serverAuth) return;
+    let cancelled = false;
+    setHallWifeLoading(true);
+    api
+      .wife()
+      .then((state) => {
+        if (!cancelled) setHallWife(state);
+      })
+      .catch(() => {
+        if (!cancelled) setHallWife(null);
+      })
+      .finally(() => {
+        if (!cancelled) setHallWifeLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, devActive, serverAuth]);
+
+  const loadHallEntry = useCallback(
+    async (task: Task, manual: boolean): Promise<GalleryEntry> => {
+      const empty: GalleryEntry = {
+        image: null,
+        praise: null,
+        score: null,
+        createdAt: null,
+        manual,
+      };
+
+      if (showWifeHall) {
+        try {
+          const state = await api.wifeTask(task.id);
+          return {
+            image: state.photo?.image ?? null,
+            praise: state.photo?.reason ?? null,
+            score: state.photo?.score ?? null,
+            createdAt: state.createdAt ?? state.photo?.createdAt ?? null,
+            manual: state.manual,
+          };
+        } catch {
+          return empty;
+        }
+      }
+
+      if (manual || !serverAuth) return empty;
+
+      try {
+        const photo = await loadPhoto(task.id);
+        return {
+          image: photo.image,
+          praise: photo.reason ?? null,
+          score: photo.score,
+          createdAt: photo.createdAt,
+          manual: false,
+        };
+      } catch {
+        return empty;
+      }
+    },
+    [serverAuth, showWifeHall],
+  );
+
   const availableCounts = useMemo(() => {
     const counts = { 1: 0, 2: 0, 3: 0, 4: 0 } as Record<LevelId, number>;
     for (const level of LEVELS) {
@@ -107,6 +190,27 @@ export default function App() {
     impact('light');
     setTab(next);
   };
+
+  const openHall = () => {
+    impact('light');
+    markHallIntroSeen();
+    if (devActive && serverAuth) setHallWifeLoading(true);
+    setView('hall');
+  };
+
+  const closeHall = () => {
+    impact('light');
+    setView('tasks');
+  };
+
+  const handleHallTask = (task: Task) => {
+    impact('light');
+    setTab(task.level);
+    setView('tasks');
+    setFocusTaskId(task.id);
+  };
+
+  const clearFocus = useCallback(() => setFocusTaskId(null), []);
 
   const handleOpenTask = (task: Task) => {
     impact('light');
@@ -229,10 +333,28 @@ export default function App() {
 
   return (
     <div className="app">
-      <Header points={points} onUnlockDev={unlockDev} />
+      <Header
+        points={points}
+        onUnlockDev={unlockDev}
+        onOpenHall={openHall}
+        hallIntro={!hallIntroSeen}
+        hallActive={view === 'hall'}
+      />
 
       <main className="main">
-        {tab === 'chest' ? (
+        {view === 'hall' ? (
+          <HallOfFame
+            completed={showWifeHall ? hallWife?.completed ?? [] : completed}
+            manualCompleted={
+              showWifeHall ? hallWife?.manualCompleted ?? [] : manualCompleted
+            }
+            loading={hallLoading}
+            wifeMode={showWifeHall}
+            loadEntry={loadHallEntry}
+            onBack={closeHall}
+            onOpenTask={handleHallTask}
+          />
+        ) : tab === 'chest' ? (
           <ChestScreen
             points={points}
             ready={chestUnlocked}
@@ -246,18 +368,22 @@ export default function App() {
             level={LEVEL_BY_ID.get(tab) ?? LEVELS[0]}
             completed={completed}
             statuses={statuses}
+            focusTaskId={focusTaskId}
+            onFocusHandled={clearFocus}
             onOpenTask={handleOpenTask}
             onLocked={handleLocked}
           />
         )}
       </main>
 
-      <TabBar
-        active={tab}
-        availableCounts={availableCounts}
-        chestReady={chestUnlocked}
-        onChange={handleTab}
-      />
+      {view === 'tasks' && (
+        <TabBar
+          active={tab}
+          availableCounts={availableCounts}
+          chestReady={chestUnlocked}
+          onChange={handleTab}
+        />
+      )}
 
       <AnimatePresence>
         {selectedTask && (
@@ -284,6 +410,8 @@ export default function App() {
       )}
 
       {devOpen && devActive && <DevPanel onClose={() => setDevOpen(false)} />}
+
+      {!hallIntroSeen && <div className="hall-intro" aria-hidden="true" />}
 
       {toast && <div className="toast">{toast}</div>}
     </div>
