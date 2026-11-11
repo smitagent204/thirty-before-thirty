@@ -1,8 +1,26 @@
-import { buildVerdictPrompt, type Deduction, type PreviousAttempt } from '../../shared/aiPrompt';
-import type { AiVerdict, Task } from '../../shared/types';
+import { buildVerdictPrompt, type PreviousAttempt } from '../../shared/aiPrompt';
+import type { AiDeduction, AiVerdict, Task, TaskRequirement } from '../../shared/types';
 import type { Env } from './_shared';
 
-const MAX_DEDUCTIONS = 3;
+const PASS_SCORE = 70;
+const INVALID_SCORE = 15;
+const FALLBACK_MISS_PERCENT = 35;
+
+interface RawDeduction {
+  id?: string;
+  label?: string;
+  /** missing — полный вес, partial — половина. percent оставлен для старых ответов. */
+  state?: 'missing' | 'partial';
+  percent?: number;
+}
+
+interface RawVerdict {
+  reason: string;
+  confidence: number;
+  invalid: boolean;
+  allVisible: boolean;
+  deductions: RawDeduction[];
+}
 
 function extractText(result: unknown): string {
   if (typeof result === 'string') return result;
@@ -20,33 +38,37 @@ function extractText(result: unknown): string {
   return '';
 }
 
-function parseDeductions(raw: unknown): Deduction[] {
+function normalize(value: string): string {
+  return value.toLowerCase().replace(/ё/g, 'е').replace(/[^a-zа-я0-9]+/gi, ' ').trim();
+}
+
+function parseRawDeductions(raw: unknown): RawDeduction[] {
   if (!Array.isArray(raw)) return [];
-  const items: Deduction[] = [];
+  const items: RawDeduction[] = [];
 
   for (const entry of raw) {
     if (!entry || typeof entry !== 'object') continue;
     const value = entry as Record<string, unknown>;
-    const labelRaw =
-      typeof value.label === 'string'
-        ? value.label
-        : typeof value.reason === 'string'
-          ? value.reason
-          : '';
-    const label = labelRaw
-      .replace(/\s+/g, ' ')
-      .trim()
-      .replace(/^за\s+/i, '')
-      .replace(/[.,;:]+$/, '');
-    const percent = Number(value.percent ?? value.points ?? value.value);
-    if (!label || !Number.isFinite(percent) || percent <= 0) continue;
-    items.push({ label: label.slice(0, 90), percent: Math.round(percent) });
+    const rawState = typeof value.state === 'string' ? value.state.toLowerCase() : '';
+    const state =
+      rawState === 'partial' || rawState === 'частично'
+        ? 'partial'
+        : rawState === 'missing' || rawState === 'нет' || rawState === 'отсутствует'
+          ? 'missing'
+          : undefined;
+    const rawPercent = Number(value.percent ?? value.points ?? value.value);
+    const percent = Number.isFinite(rawPercent) && rawPercent > 0 ? Math.round(rawPercent) : undefined;
+    if (!state && percent === undefined) continue;
+
+    const id = typeof value.id === 'string' ? value.id.trim() : undefined;
+    const label = typeof value.label === 'string' ? value.label.trim() : undefined;
+    items.push({ id, label, state, percent });
   }
 
-  return items.slice(0, MAX_DEDUCTIONS);
+  return items.slice(0, 8);
 }
 
-export function parseVerdict(text: string): AiVerdict | null {
+export function parseVerdict(text: string): RawVerdict | null {
   const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
   const start = cleaned.indexOf('{');
   const end = cleaned.lastIndexOf('}');
@@ -54,79 +76,136 @@ export function parseVerdict(text: string): AiVerdict | null {
 
   try {
     const raw = JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>;
-    const score = Number(raw.score);
-    const confidence = Number(raw.confidence);
-    const verdict = raw.verdict === 'pass' || raw.verdict === 'fail' ? raw.verdict : null;
     const reason = typeof raw.reason === 'string' ? raw.reason.slice(0, 300).trim() : '';
-
-    if (!verdict || !reason || !Number.isFinite(score) || !Number.isFinite(confidence)) {
-      return null;
-    }
+    const confidence = Number(raw.confidence);
+    if (!reason || !Number.isFinite(confidence)) return null;
 
     return {
-      score: Math.max(0, Math.min(100, Math.round(score))),
-      verdict,
       reason,
       confidence: Math.max(0, Math.min(1, confidence)),
-      deductions: parseDeductions(raw.deductions),
+      invalid: raw.invalid === true,
+      // Старые ответы без all_visible считаем «всё видно», если нет вычетов.
+      allVisible: raw.all_visible !== false,
+      deductions: parseRawDeductions(raw.deductions),
     };
   } catch {
     return null;
   }
 }
 
-/**
- * Приводит разбивку к ровно `gap` процентам. Модель часто ошибается в сумме,
- * а оценку уже выставила — масштабируем доли, чтобы арифметика сходилась.
- */
-export function normalizeDeductions(
-  deductions: Deduction[] | undefined,
-  gap: number,
-): Deduction[] {
-  const items = (deductions ?? []).filter((item) => item.percent > 0).slice(0, MAX_DEDUCTIONS);
-  if (gap <= 0 || items.length === 0) return [];
-  if (gap < items.length) {
-    return items.slice(0, gap).map((item) => ({ ...item, percent: 1 }));
+/** Читает deductions из D1: там лежит JSON, но старые строки могут быть пустыми. */
+export function parseStoredDeductions(raw: unknown): AiDeduction[] {
+  if (typeof raw !== 'string' || !raw.trim()) return [];
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((entry) => {
+        if (!entry || typeof entry !== 'object') return null;
+        const value = entry as Record<string, unknown>;
+        const label = typeof value.label === 'string' ? value.label.trim() : '';
+        const percent = Number(value.percent);
+        if (!label || !Number.isFinite(percent) || percent <= 0) return null;
+        return {
+          ...(typeof value.id === 'string' ? { id: value.id } : {}),
+          label,
+          percent: Math.round(percent),
+        } satisfies AiDeduction;
+      })
+      .filter((entry): entry is AiDeduction => Boolean(entry));
+  } catch {
+    return [];
+  }
+}
+
+function matchRequirement(
+  deduction: RawDeduction,
+  required: TaskRequirement[],
+): TaskRequirement | null {
+  if (deduction.id) {
+    const byId = required.find((item) => item.id === deduction.id);
+    if (byId) return byId;
+  }
+  if (deduction.label) {
+    const target = normalize(deduction.label);
+    const byLabel = required.find((item) => normalize(item.label) === target);
+    if (byLabel) return byLabel;
+  }
+  return null;
+}
+
+/** Оставляет только пункты из рубрики, обрезает проценты по весам и убирает дубли. */
+export function applyDeductions(
+  raw: RawDeduction[],
+  required: TaskRequirement[],
+): AiDeduction[] {
+  const byId = new Map<string, AiDeduction>();
+
+  for (const deduction of raw) {
+    const requirement = matchRequirement(deduction, required);
+    if (!requirement) continue;
+    const percent =
+      deduction.state === 'partial'
+        ? Math.max(1, Math.round(requirement.weight / 2))
+        : deduction.state === 'missing'
+          ? requirement.weight
+          : Math.max(
+              1,
+              Math.min(requirement.weight, deduction.percent ?? requirement.weight),
+            );
+    const current = byId.get(requirement.id);
+    if (!current || percent > current.percent) {
+      byId.set(requirement.id, {
+        id: requirement.id,
+        label: requirement.miss,
+        percent,
+      });
+    }
   }
 
-  const sum = items.reduce((total, item) => total + item.percent, 0);
-  let remaining = gap;
-  const result: Deduction[] = [];
-
-  items.forEach((item, index) => {
-    const isLast = index === items.length - 1;
-    const fairShare = Math.round((item.percent * gap) / sum);
-    const percent = isLast
-      ? remaining
-      : Math.max(1, Math.min(remaining - (items.length - index - 1), fairShare));
-    result.push({ label: item.label, percent });
-    remaining -= percent;
-  });
-
-  return result;
+  return required
+    .map((item) => byId.get(item.id))
+    .filter((item): item is AiDeduction => Boolean(item));
 }
 
-/** Убирает проценты, если модель всё-таки вписала их в текст комментария. */
-function stripDeductionMentions(reason: string): string {
-  return reason
-    .replace(/\s*[−–-]\s*\d+\s*%\s*[—–-]\s*за\s+[^.;]+/gi, '')
-    .replace(/\s*[−–-]\s*\d+\s*%/gi, '')
-    .replace(/\s{2,}/g, ' ')
-    .replace(/[,;]?\s*\b(но|а|однако|только)\s*([.!?])/gi, '$2')
-    .replace(/\s+([.,;!?])/g, '$1')
-    .trim();
-}
+function buildVerdict(
+  task: Task,
+  raw: RawVerdict,
+  options: { forceMiss?: boolean } = {},
+): AiVerdict {
+  if (raw.invalid) {
+    return {
+      score: INVALID_SCORE,
+      verdict: 'fail',
+      reason: raw.reason,
+      confidence: raw.confidence,
+      deductions: [],
+    };
+  }
 
-function formatReason(verdict: AiVerdict): string {
-  const reason = stripDeductionMentions(verdict.reason);
-  if (verdict.verdict !== 'pass') return reason;
+  let deductions = applyDeductions(raw.deductions, task.rubric.required);
 
-  const items = normalizeDeductions(verdict.deductions, 100 - verdict.score);
-  if (items.length === 0) return reason;
+  // Модель сказала, что чего-то не хватает, но не назвала пункт.
+  // Не засчитываем вслепую: показываем общий вычет, чтобы фото можно было переснять.
+  if (deductions.length === 0 && (!raw.allVisible || options.forceMiss)) {
+    deductions = [
+      {
+        label: 'обязательные детали не читаются на фото',
+        percent: FALLBACK_MISS_PERCENT,
+      },
+    ];
+  }
 
-  const tail = items.map((item) => `−${item.percent}% — за ${item.label}`).join('; ');
-  const base = reason.replace(/[.!…\s]+$/, '');
-  return base ? `${base}. ${tail}.` : `${tail}.`;
+  const total = deductions.reduce((sum, item) => sum + item.percent, 0);
+  const score = Math.max(0, Math.min(100, 100 - total));
+
+  return {
+    score,
+    verdict: score >= PASS_SCORE ? 'pass' : 'fail',
+    reason: raw.reason,
+    confidence: raw.confidence,
+    deductions,
+  };
 }
 
 async function askModel(
@@ -177,26 +256,29 @@ export async function evaluatePhoto(
   previous?: PreviousAttempt | null,
 ): Promise<AiVerdict> {
   const prompt = buildVerdictPrompt(task, previous);
-  let verdict = parseVerdict(await runVision(env, prompt, image));
-  if (!verdict) throw new Error('ai_invalid_response');
+  let raw = parseVerdict(await runVision(env, prompt, image));
+  if (!raw) throw new Error('ai_invalid_response');
 
-  // Если модель забыла разбивку, просим один раз повторить ответ с ней:
-  // иначе пользователь снова увидит оценку без объяснения, за что сняли.
-  if (verdict.verdict === 'pass' && verdict.score < 100 && !verdict.deductions?.length) {
-    const gap = 100 - verdict.score;
+  // Если модель говорит «чего-то не хватает», но не назвала ни одного
+  // существующего пункта — просим один раз повторить, иначе оценка будет
+  // без объяснения или с придуманным критерием.
+  const mapped = applyDeductions(raw.deductions, task.rubric.required);
+  const needsRepair =
+    !raw.invalid && mapped.length === 0 && (!raw.allVisible || raw.deductions.length > 0);
+  if (needsRepair) {
     try {
       const repair = parseVerdict(
         await runVision(
           env,
-          `${prompt}\n\nТвой ответ неполный: не заполнен deductions. Верни ТОЛЬКО JSON заново, добавив 1–3 конкретных пункта в deductions, чтобы сумма percent была ровно ${gap}.`,
+          `${prompt}\n\nТвой ответ неполный: all_visible = false, но deductions пустой. Верни ТОЛЬКО JSON заново и перечисли в deductions все обязательные пункты, которых не видно, с их id и state (missing или partial).`,
           image,
         ),
       );
-      if (repair?.deductions?.length) verdict = repair;
+      if (repair) raw = repair;
     } catch {
-      // Оставляем первый ответ — лучше оценка без разбивки, чем ошибка.
+      // Оставляем первый ответ, ниже сработает общий вычет.
     }
   }
 
-  return { ...verdict, reason: formatReason(verdict) };
+  return buildVerdict(task, raw);
 }

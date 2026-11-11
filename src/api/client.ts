@@ -1,3 +1,5 @@
+import type { AiDeduction } from '@shared/types';
+
 export interface ServerState {
   completed: string[];
   manualCompleted: string[];
@@ -18,6 +20,8 @@ export interface CheckResult {
   /** Новый кадр сохранён (при повторной проверке — только если стал лучше). */
   saved?: boolean;
   previousScore?: number | null;
+  /** Понятный список того, чего не хватило: id, подпись и процент. */
+  deductions?: AiDeduction[];
 }
 
 export interface RecheckResult {
@@ -28,6 +32,7 @@ export interface RecheckResult {
   oldVerdict: string;
   verdict: string;
   reason: string;
+  deductions: AiDeduction[];
   improved: boolean;
 }
 
@@ -51,6 +56,7 @@ export interface PhotoResult {
   score: number;
   verdict: string;
   reason?: string;
+  deductions?: AiDeduction[];
   confidence: number;
   createdAt: string;
 }

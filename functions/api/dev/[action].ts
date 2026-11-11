@@ -1,6 +1,6 @@
 import { nextAvailableTask } from '../../../shared/progress';
 import { TASKS, TASK_BY_ID } from '../../../shared/tasks';
-import { evaluatePhoto } from '../_ai';
+import { evaluatePhoto, parseStoredDeductions } from '../_ai';
 import {
   authenticate,
   json,
@@ -118,7 +118,7 @@ async function wifeTask(ctx: Ctx): Promise<Response> {
   }
 
   const photo = await ctx.env.DB.prepare(
-    `SELECT mime, image, score, verdict, reason, confidence, created_at
+    `SELECT mime, image, score, verdict, reason, confidence, deductions, created_at
      FROM photos
      WHERE telegram_id = ? AND task_id = ?
      ORDER BY created_at DESC, rowid DESC
@@ -132,6 +132,7 @@ async function wifeTask(ctx: Ctx): Promise<Response> {
       verdict: string;
       reason: string;
       confidence: number;
+      deductions: string;
       created_at: string;
     }>();
 
@@ -145,6 +146,7 @@ async function wifeTask(ctx: Ctx): Promise<Response> {
           score: photo.score,
           verdict: photo.verdict,
           reason: photo.reason,
+          deductions: parseStoredDeductions(photo.deductions),
           confidence: photo.confidence,
           createdAt: photo.created_at,
         }
@@ -169,7 +171,7 @@ async function recheckWifeTask(ctx: Ctx): Promise<Response> {
   if (!completion) return json({ error: 'task_not_completed' }, 404);
 
   const photo = await ctx.env.DB.prepare(
-    `SELECT id, mime, image, score, verdict, reason
+    `SELECT id, mime, image, score, verdict, reason, deductions
      FROM photos
      WHERE telegram_id = ? AND task_id = ?
      ORDER BY created_at DESC, rowid DESC
@@ -183,6 +185,7 @@ async function recheckWifeTask(ctx: Ctx): Promise<Response> {
       score: number;
       verdict: string;
       reason: string;
+      deductions: string;
     }>();
   if (!photo) return json({ error: 'photo_not_found' }, 404);
 
@@ -193,10 +196,17 @@ async function recheckWifeTask(ctx: Ctx): Promise<Response> {
 
     await ctx.env.DB.prepare(
       `UPDATE photos
-       SET score = ?, verdict = ?, reason = ?, confidence = ?
+       SET score = ?, verdict = ?, reason = ?, confidence = ?, deductions = ?
        WHERE id = ?`,
     )
-      .bind(verdict.score, verdict.verdict, verdict.reason, verdict.confidence, photo.id)
+      .bind(
+        verdict.score,
+        verdict.verdict,
+        verdict.reason,
+        verdict.confidence,
+        JSON.stringify(verdict.deductions ?? []),
+        photo.id,
+      )
       .run();
 
     return json({
@@ -207,6 +217,7 @@ async function recheckWifeTask(ctx: Ctx): Promise<Response> {
       oldVerdict: photo.verdict,
       verdict: verdict.verdict,
       reason: verdict.reason,
+      deductions: verdict.deductions ?? [],
       improved: verdict.score > photo.score,
     });
   } catch {

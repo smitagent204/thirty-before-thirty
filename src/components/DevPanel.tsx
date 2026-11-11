@@ -14,6 +14,7 @@ import { readFileAsDataUrl } from '../lib/photo';
 import { decodeQrLink } from '../lib/qr';
 import { useProgressStore } from '../store/useProgressStore';
 import { impact, openExternalLink } from '../telegram/useTelegram';
+import { VerdictDetails } from './VerdictDetails';
 
 interface DevPanelProps {
   onClose: () => void;
@@ -368,6 +369,13 @@ export function DevPanel({ onClose }: DevPanelProps) {
                                 row.improved ? ' ↑' : row.newScore < row.oldScore ? ' ↓' : ''
                               } · ${row.reason}`}
                         </span>
+                        {!('error' in row) && row.deductions && row.deductions.length > 0 && (
+                          <span className="dev-row__sub dev-row__sub--misses">
+                            {row.deductions
+                              .map((item) => `−${item.percent}% — ${item.label}`)
+                              .join('; ')}
+                          </span>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -483,10 +491,14 @@ export function DevPanel({ onClose }: DevPanelProps) {
                     )}
                   </p>
 
-                  {inspectState.photo?.reason && (
-                    <p className="sheet__hint" style={{ marginTop: 10 }}>
-                      Комментарий ИИ: {inspectState.photo.reason}
-                    </p>
+                  {inspectState.photo && (
+                    <div style={{ marginTop: 10 }}>
+                      <VerdictDetails
+                        reason={inspectState.photo.reason}
+                        deductions={inspectState.photo.deductions}
+                        compact
+                      />
+                    </div>
                   )}
 
                   {inspectState.photo?.image && (

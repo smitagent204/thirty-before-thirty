@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import { LEVEL_BY_ID } from '@shared/levels';
-import type { AiVerdict, Task, TaskStatus } from '@shared/types';
+import type { AiDeduction, AiVerdict, Task, TaskStatus } from '@shared/types';
 import { impact, notify } from '../telegram/useTelegram';
 import { api, ApiError, hasTelegramAuth, type PhotoResult } from '../api/client';
 import { compressPhoto } from '../lib/photo';
 import { ManualApprovalSheet } from './ManualApprovalSheet';
+import { VerdictDetails } from './VerdictDetails';
 
 type Phase = 'idle' | 'checking' | 'pass' | 'fail';
 
@@ -47,6 +48,7 @@ export function TaskDetailsSheet({
   const [improveResult, setImproveResult] = useState<{
     score: number;
     reason: string;
+    deductions: AiDeduction[];
     saved: boolean;
     previousScore: number | null;
   } | null>(null);
@@ -173,6 +175,7 @@ export function TaskDetailsSheet({
               score: result.score,
               verdict: 'pass',
               reason: result.reason,
+              deductions: result.deductions ?? [],
               confidence: result.confidence,
               createdAt: new Date().toISOString(),
             });
@@ -185,6 +188,7 @@ export function TaskDetailsSheet({
           setImproveResult({
             score: result.score,
             reason: result.reason,
+            deductions: result.deductions ?? [],
             saved,
             previousScore: result.previousScore ?? null,
           });
@@ -314,22 +318,34 @@ export function TaskDetailsSheet({
                         {acceptedPhoto.score}%
                       </span>
                     </div>
+                    <VerdictDetails
+                      reason={acceptedPhoto.reason}
+                      deductions={acceptedPhoto.deductions}
+                      compact
+                    />
                   </div>
                 )}
                 {improveResult && (
-                  <p
+                  <div
                     className={`improve-note${
                       improveResult.saved ? ' improve-note--saved' : ''
                     }`}
                   >
-                    {improveResult.saved
-                      ? `Оценка обновлена: ${improveResult.score}%${
-                          improveDelta !== null && improveDelta > 0
-                            ? ` (+${improveDelta})`
-                            : ''
-                        }. ${improveResult.reason}`
-                      : `Новое фото прошло порог, но оценка не выше прежней — оставили предыдущий кадр. ${improveResult.reason}`}
-                  </p>
+                    <p className="improve-note__summary">
+                      {improveResult.saved
+                        ? `Оценка обновлена: ${improveResult.score}%${
+                            improveDelta !== null && improveDelta > 0
+                              ? ` (+${improveDelta})`
+                              : ''
+                          }`
+                        : 'Новое фото прошло порог, но оценка не выше прежней — оставили предыдущий кадр'}
+                    </p>
+                    <VerdictDetails
+                      reason={improveResult.reason}
+                      deductions={improveResult.deductions}
+                      compact
+                    />
+                  </div>
                 )}
                 {serverAuth && !improving && (
                   <button
@@ -428,7 +444,10 @@ export function TaskDetailsSheet({
                       {verdict.verdict === 'pass' && (
                         <strong className="verdict__title">Фото принято</strong>
                       )}
-                      <span>{verdict.reason}</span>
+                      <VerdictDetails
+                        reason={verdict.reason}
+                        deductions={verdict.deductions}
+                      />
                     </div>
                   </div>
                 )}

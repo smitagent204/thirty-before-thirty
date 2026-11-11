@@ -1,6 +1,6 @@
 import { computeStatuses } from '../../../../shared/progress';
 import { TASK_BY_ID } from '../../../../shared/tasks';
-import { evaluatePhoto } from '../../_ai';
+import { evaluatePhoto, parseStoredDeductions } from '../../_ai';
 import {
   authenticate,
   json,
@@ -45,16 +45,24 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
       }
     }
 
-    const previous = alreadyCompleted
+    const previousRow = alreadyCompleted
       ? await env.DB.prepare(
-          `SELECT score, reason
+          `SELECT score, reason, deductions
            FROM photos
            WHERE telegram_id = ? AND task_id = ?
            ORDER BY created_at DESC, rowid DESC
            LIMIT 1`,
         )
           .bind(auth.user.id, task.id)
-          .first<{ score: number; reason: string }>()
+          .first<{ score: number; reason: string; deductions: string }>()
+      : null;
+
+    const previous = previousRow
+      ? {
+          score: previousRow.score,
+          reason: previousRow.reason,
+          deductions: parseStoredDeductions(previousRow.deductions),
+        }
       : null;
 
     // В dev-режиме владелец может принудительно проверить ветку провала.
@@ -68,6 +76,7 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
         forced: true,
         recheck: alreadyCompleted,
         previousScore: previous?.score ?? null,
+        deductions: [],
       });
     }
 
@@ -83,6 +92,7 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
         confidence: verdict.confidence,
         recheck: alreadyCompleted,
         previousScore: previous?.score ?? null,
+        deductions: verdict.deductions ?? [],
       });
     }
 
@@ -100,6 +110,7 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
         recheck: true,
         saved: false,
         previousScore: previous?.score ?? null,
+        deductions: verdict.deductions ?? [],
         points: 0,
       });
     }
@@ -108,8 +119,8 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
     const statements = [
       env.DB.prepare(
         `INSERT INTO photos
-           (id, telegram_id, task_id, mime, image, score, verdict, reason, confidence)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, telegram_id, task_id, mime, image, score, verdict, reason, confidence, deductions)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         photoId,
         auth.user.id,
@@ -120,6 +131,7 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
         verdict.verdict,
         verdict.reason,
         verdict.confidence,
+        JSON.stringify(verdict.deductions ?? []),
       ),
     ];
 
@@ -151,6 +163,7 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
       recheck: alreadyCompleted,
       saved: true,
       previousScore: previous?.score ?? null,
+      deductions: verdict.deductions ?? [],
       photoId,
       points: alreadyCompleted ? 0 : task.points,
     });
