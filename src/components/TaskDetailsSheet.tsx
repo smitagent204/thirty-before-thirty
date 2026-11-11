@@ -43,8 +43,16 @@ export function TaskDetailsSheet({
   const [verdict, setVerdict] = useState<AiVerdict | null>(null);
   const [manualOpen, setManualOpen] = useState(false);
   const [acceptedPhoto, setAcceptedPhoto] = useState<PhotoResult | null>(null);
+  const [improving, setImproving] = useState(false);
+  const [improveResult, setImproveResult] = useState<{
+    score: number;
+    reason: string;
+    saved: boolean;
+    previousScore: number | null;
+  } | null>(null);
   const timer = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const serverAuth = hasTelegramAuth();
   const confetti = useMemo(
     () =>
       Array.from({ length: 16 }, (_, index) => {
@@ -67,11 +75,11 @@ export function TaskDetailsSheet({
   );
   // Фиксируем на момент открытия: если сервер подтвердит задание, пока лист открыт,
   // не переключаем интерфейс под руками — пользователь сам нажмёт «Забрать».
-  const [done] = useState(() => status === 'completed');
+  const [done, setDone] = useState(() => status === 'completed');
 
   // Если задание уже выполнено, показываем фото, которое прошло проверку.
   useEffect(() => {
-    if (!done || isManual || !hasTelegramAuth()) return;
+    if (!done || !serverAuth) return;
     let cancelled = false;
     api
       .photo(task.id)
@@ -84,7 +92,7 @@ export function TaskDetailsSheet({
     return () => {
       cancelled = true;
     };
-  }, [done, isManual, task.id]);
+  }, [done, serverAuth, task.id]);
 
   useEffect(() => {
     return () => {
@@ -145,6 +153,8 @@ export function TaskDetailsSheet({
     try {
       const image = await compressPhoto(file);
       const result = await api.check(task.id, image, isDev && forceFail);
+      const isRecheck = done || result.recheck === true;
+      if (isRecheck && !done) setDone(true);
       setVerdict({
         score: result.score,
         verdict: result.verdict,
@@ -154,6 +164,36 @@ export function TaskDetailsSheet({
       if (result.pass) {
         setPhase('pass');
         notify('success');
+
+        if (isRecheck) {
+          const saved = result.saved !== false;
+          if (saved) {
+            setAcceptedPhoto({
+              image,
+              score: result.score,
+              verdict: 'pass',
+              reason: result.reason,
+              confidence: result.confidence,
+              createdAt: new Date().toISOString(),
+            });
+            // Подтягиваем серверную запись, чтобы дата и данные были точными.
+            void api
+              .photo(task.id)
+              .then((photo) => setAcceptedPhoto(photo))
+              .catch(() => {});
+          }
+          setImproveResult({
+            score: result.score,
+            reason: result.reason,
+            saved,
+            previousScore: result.previousScore ?? null,
+          });
+          setImproving(false);
+          setFile(null);
+          setPreview(null);
+          setFileName(null);
+        }
+
         void onChecked();
       } else {
         setPhase('fail');
@@ -178,16 +218,40 @@ export function TaskDetailsSheet({
     }
   };
 
+  const startImprove = () => {
+    setImproving(true);
+    setImproveResult(null);
+    setPhase('idle');
+    setVerdict(null);
+    setFile(null);
+    setPreview(null);
+    setFileName(null);
+  };
+
   const collect = () => {
     onComplete(task.id);
     notify('success');
     onClose();
   };
 
+  const cancelImprove = () => {
+    setImproving(false);
+    setPhase('idle');
+    setVerdict(null);
+    setFile(null);
+    setPreview(null);
+    setFileName(null);
+  };
+
   const devComplete = async () => {
     await onDevComplete(task.id);
     onClose();
   };
+
+  const improveDelta =
+    improveResult && improveResult.previousScore !== null
+      ? improveResult.score - improveResult.previousScore
+      : null;
 
   return (
     <motion.div
@@ -231,7 +295,7 @@ export function TaskDetailsSheet({
               <p className="sheet__hint">{task.photoHint}</p>
             </section>
 
-            {done ? (
+            {done && (
               <section className="sheet__section">
                 <h4 className="sheet__section-title">
                   <span aria-hidden="true">✓</span> Задание выполнено
@@ -241,7 +305,7 @@ export function TaskDetailsSheet({
                     ? 'Задание засчитано вручную — фото не требовалось.'
                     : 'Фото проверено, баллы зачислены.'}
                 </p>
-                {!isManual && acceptedPhoto && (
+                {acceptedPhoto && !improving && (
                   <div className="accepted-photo">
                     <img src={acceptedPhoto.image} alt="Принятое фото" />
                     <div className="accepted-photo__meta">
@@ -252,91 +316,123 @@ export function TaskDetailsSheet({
                     </div>
                   </div>
                 )}
-              </section>
-            ) : (
-              <>
-                <section className="sheet__section">
-                  <h4 className="sheet__section-title">
-                    <span aria-hidden="true">📷</span> Подтверждение
-                  </h4>
-                  <div
-                    className={`dropzone${phase === 'checking' ? ' is-checking' : ''}${
-                      phase === 'pass' ? ' is-accepted' : ''
+                {improveResult && (
+                  <p
+                    className={`improve-note${
+                      improveResult.saved ? ' improve-note--saved' : ''
                     }`}
                   >
-                    {preview ? (
-                      <img className="dropzone__preview" src={preview} alt="Выбранное фото" />
-                    ) : (
-                      <>
-                        <span className="dropzone__icon" aria-hidden="true">
-                          🖼️
-                        </span>
-                        <span className="dropzone__title">Добавить фото</span>
-                        <span className="dropzone__hint">
-                          Нажми, чтобы снять или выбрать из галереи
-                        </span>
-                      </>
-                    )}
-                    {phase === 'pass' && (
-                      <div className="accept-fx" aria-hidden="true">
-                        <div className="accept-fx__confetti">
-                          {confetti.map((piece) => (
-                            <span
-                              key={piece.id}
-                              className="confetti-piece"
-                              style={
-                                {
-                                  '--x': `${piece.x}%`,
-                                  '--y': `${piece.y}%`,
-                                  '--dx': `${piece.dx}px`,
-                                  '--dy': `${piece.dy}px`,
-                                  '--delay': `${piece.delay}ms`,
-                                  '--dur': `${piece.duration}ms`,
-                                  '--size': `${piece.size}px`,
-                                  '--color': piece.color,
-                                  '--spin': `${piece.spin}deg`,
-                                } as CSSProperties
-                              }
-                            />
-                          ))}
-                        </div>
-                        <span className="accept-fx__stamp">✓ Фото принято</span>
+                    {improveResult.saved
+                      ? `Оценка обновлена: ${improveResult.score}%${
+                          improveDelta !== null && improveDelta > 0
+                            ? ` (+${improveDelta})`
+                            : ''
+                        }. ${improveResult.reason}`
+                      : `Новое фото прошло порог, но оценка не выше прежней — оставили предыдущий кадр. ${improveResult.reason}`}
+                  </p>
+                )}
+                {serverAuth && !improving && (
+                  <button
+                    type="button"
+                    className="btn btn--ghost btn--sm"
+                    style={{ marginTop: 10 }}
+                    onClick={startImprove}
+                  >
+                    Загрузить новое фото
+                  </button>
+                )}
+              </section>
+            )}
+
+            {(!done || improving) && (
+              <section className="sheet__section">
+                <h4 className="sheet__section-title">
+                  <span aria-hidden="true">📷</span>{' '}
+                  {done ? 'Работа над ошибками' : 'Подтверждение'}
+                </h4>
+                {done && (
+                  <p className="sheet__hint" style={{ marginBottom: 10 }}>
+                    Загрузи новый кадр — если замечания исправлены, оценка станет выше, а
+                    баллы останутся прежними.
+                  </p>
+                )}
+                <div
+                  className={`dropzone${phase === 'checking' ? ' is-checking' : ''}${
+                    phase === 'pass' ? ' is-accepted' : ''
+                  }`}
+                >
+                  {preview ? (
+                    <img className="dropzone__preview" src={preview} alt="Выбранное фото" />
+                  ) : (
+                    <>
+                      <span className="dropzone__icon" aria-hidden="true">
+                        🖼️
+                      </span>
+                      <span className="dropzone__title">Добавить фото</span>
+                      <span className="dropzone__hint">
+                        Нажми, чтобы снять или выбрать из галереи
+                      </span>
+                    </>
+                  )}
+                  {phase === 'pass' && (
+                    <div className="accept-fx" aria-hidden="true">
+                      <div className="accept-fx__confetti">
+                        {confetti.map((piece) => (
+                          <span
+                            key={piece.id}
+                            className="confetti-piece"
+                            style={
+                              {
+                                '--x': `${piece.x}%`,
+                                '--y': `${piece.y}%`,
+                                '--dx': `${piece.dx}px`,
+                                '--dy': `${piece.dy}px`,
+                                '--delay': `${piece.delay}ms`,
+                                '--dur': `${piece.duration}ms`,
+                                '--size': `${piece.size}px`,
+                                '--color': piece.color,
+                                '--spin': `${piece.spin}deg`,
+                              } as CSSProperties
+                            }
+                          />
+                        ))}
                       </div>
-                    )}
-                    <input
-                      ref={inputRef}
-                      className="photo-input"
-                      type="file"
-                      accept="image/*"
-                      onChange={(event) => pickFile(event.target.files?.[0] ?? null)}
-                      aria-label="Загрузить фото"
-                    />
+                      <span className="accept-fx__stamp">✓ Фото принято</span>
+                    </div>
+                  )}
+                  <input
+                    ref={inputRef}
+                    className="photo-input"
+                    type="file"
+                    accept="image/*"
+                    onChange={(event) => pickFile(event.target.files?.[0] ?? null)}
+                    aria-label="Загрузить фото"
+                  />
+                </div>
+                {fileName && <p className="dev-note">Выбрано: {fileName}</p>}
+
+                {phase === 'checking' && (
+                  <div className="checking">
+                    <span className="checking__spinner" aria-hidden="true" />
+                    <span className="checking__text">Проверяем кадр…</span>
                   </div>
-                  {fileName && <p className="dev-note">Выбрано: {fileName}</p>}
+                )}
 
-                  {phase === 'checking' && (
-                    <div className="checking">
-                      <span className="checking__spinner" aria-hidden="true" />
-                      <span className="checking__text">Проверяем кадр…</span>
+                {verdict && (
+                  <div
+                    className={`verdict ${verdict.verdict === 'pass' ? 'verdict--pass' : 'verdict--fail'}`}
+                    aria-live="polite"
+                  >
+                    <span className="verdict__score">{verdict.score}%</span>
+                    <div className="verdict__body">
+                      {verdict.verdict === 'pass' && (
+                        <strong className="verdict__title">Фото принято</strong>
+                      )}
+                      <span>{verdict.reason}</span>
                     </div>
-                  )}
-
-                  {verdict && (
-                    <div
-                      className={`verdict ${verdict.verdict === 'pass' ? 'verdict--pass' : 'verdict--fail'}`}
-                      aria-live="polite"
-                    >
-                      <span className="verdict__score">{verdict.score}%</span>
-                      <div className="verdict__body">
-                        {verdict.verdict === 'pass' && (
-                          <strong className="verdict__title">Фото принято</strong>
-                        )}
-                        <span>{verdict.reason}</span>
-                      </div>
-                    </div>
-                  )}
-                </section>
-              </>
+                  </div>
+                )}
+              </section>
             )}
 
             <div className="sheet__meta">
@@ -348,11 +444,11 @@ export function TaskDetailsSheet({
           </div>
 
           <div className="sheet__footer">
-            {done ? (
+            {done && !improving ? (
               <button type="button" className="btn" onClick={onClose}>
                 Закрыть
               </button>
-            ) : phase === 'pass' ? (
+            ) : !done && phase === 'pass' ? (
               <button type="button" className="btn" onClick={collect}>
                 Забрать +{task.points}
               </button>
@@ -363,7 +459,22 @@ export function TaskDetailsSheet({
                 disabled={!file || phase === 'checking'}
                 onClick={() => void checkPhoto()}
               >
-                {phase === 'checking' ? 'Проверяем…' : 'Проверить фото'}
+                {phase === 'checking'
+                  ? 'Проверяем…'
+                  : done
+                    ? 'Проверить новое фото'
+                    : 'Проверить фото'}
+              </button>
+            )}
+
+            {done && improving && (
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                style={{ marginTop: 10 }}
+                onClick={cancelImprove}
+              >
+                Отмена
               </button>
             )}
 

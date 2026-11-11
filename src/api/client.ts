@@ -13,6 +13,22 @@ export interface CheckResult {
   confidence: number;
   completed?: boolean;
   points?: number;
+  /** Повторная проверка уже засчитанного задания. */
+  recheck?: boolean;
+  /** Новый кадр сохранён (при повторной проверке — только если стал лучше). */
+  saved?: boolean;
+  previousScore?: number | null;
+}
+
+export interface RecheckResult {
+  taskId: string;
+  title: string;
+  oldScore: number;
+  newScore: number;
+  oldVerdict: string;
+  verdict: string;
+  reason: string;
+  improved: boolean;
 }
 
 export interface ManualResult extends ServerState {
@@ -118,6 +134,12 @@ export const api = {
 
   wifeTask: (taskId: string) =>
     request<WifeTaskState>('/api/dev/wife-task', {
+      method: 'POST',
+      body: JSON.stringify({ taskId }),
+    }),
+
+  recheckWifeTask: (taskId: string) =>
+    request<RecheckResult>('/api/dev/recheck-wife-task', {
       method: 'POST',
       body: JSON.stringify({ taskId }),
     }),

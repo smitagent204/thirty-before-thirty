@@ -1,5 +1,6 @@
 import { nextAvailableTask } from '../../../shared/progress';
 import { TASKS, TASK_BY_ID } from '../../../shared/tasks';
+import { evaluatePhoto } from '../_ai';
 import {
   authenticate,
   json,
@@ -120,7 +121,7 @@ async function wifeTask(ctx: Ctx): Promise<Response> {
     `SELECT mime, image, score, verdict, reason, confidence, created_at
      FROM photos
      WHERE telegram_id = ? AND task_id = ?
-     ORDER BY created_at DESC
+     ORDER BY created_at DESC, rowid DESC
      LIMIT 1`,
   )
     .bind(telegramId, task.id)
@@ -149,6 +150,71 @@ async function wifeTask(ctx: Ctx): Promise<Response> {
         }
       : null,
   });
+}
+
+/** Один раз пересчитывает оценку сохранённого фото жены по актуальным правилам. */
+async function recheckWifeTask(ctx: Ctx): Promise<Response> {
+  const body = await readJson<WifeTaskBody>(ctx.request);
+  const task = body?.taskId ? TASK_BY_ID.get(body.taskId) : undefined;
+  if (!task) return json({ error: 'task_not_found' }, 404);
+
+  const telegramId = getWifeId(ctx.env);
+  if (!telegramId) return json({ error: 'wife_not_configured' }, 400);
+
+  const completion = await ctx.env.DB.prepare(
+    'SELECT 1 AS done FROM completions WHERE telegram_id = ? AND task_id = ?',
+  )
+    .bind(telegramId, task.id)
+    .first<{ done: number }>();
+  if (!completion) return json({ error: 'task_not_completed' }, 404);
+
+  const photo = await ctx.env.DB.prepare(
+    `SELECT id, mime, image, score, verdict, reason
+     FROM photos
+     WHERE telegram_id = ? AND task_id = ?
+     ORDER BY created_at DESC, rowid DESC
+     LIMIT 1`,
+  )
+    .bind(telegramId, task.id)
+    .first<{
+      id: string;
+      mime: string;
+      image: string;
+      score: number;
+      verdict: string;
+      reason: string;
+    }>();
+  if (!photo) return json({ error: 'photo_not_found' }, 404);
+
+  try {
+    const verdict = await evaluatePhoto(
+      ctx.env,
+      task,
+      `data:${photo.mime};base64,${photo.image}`,
+      { score: photo.score, reason: photo.reason },
+    );
+
+    await ctx.env.DB.prepare(
+      `UPDATE photos
+       SET score = ?, verdict = ?, reason = ?, confidence = ?
+       WHERE id = ?`,
+    )
+      .bind(verdict.score, verdict.verdict, verdict.reason, verdict.confidence, photo.id)
+      .run();
+
+    return json({
+      taskId: task.id,
+      title: task.title,
+      oldScore: photo.score,
+      newScore: verdict.score,
+      oldVerdict: photo.verdict,
+      verdict: verdict.verdict,
+      reason: verdict.reason,
+      improved: verdict.score > photo.score,
+    });
+  } catch {
+    return json({ error: 'ai_unavailable' }, 502);
+  }
 }
 
 async function reset(ctx: Ctx, telegramId: number): Promise<Response> {
@@ -202,6 +268,8 @@ export const onRequestPost = async (ctx: Ctx): Promise<Response> => {
         return await wifeState(ctx);
       case 'wife-task':
         return await wifeTask(ctx);
+      case 'recheck-wife-task':
+        return await recheckWifeTask(ctx);
       case 'prize':
         return await savePrize(ctx);
       default:

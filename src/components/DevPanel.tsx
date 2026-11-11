@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { LEVELS } from '@shared/levels';
 import { nextAvailableTask, tasksOfLevel } from '@shared/progress';
+import { TASK_BY_ID } from '@shared/tasks';
 import type { Task } from '@shared/types';
-import { api, ApiError, hasTelegramAuth, type WifeTaskState } from '../api/client';
+import {
+  api,
+  ApiError,
+  hasTelegramAuth,
+  type RecheckResult,
+  type WifeTaskState,
+} from '../api/client';
 import { readFileAsDataUrl } from '../lib/photo';
 import { decodeQrLink } from '../lib/qr';
 import { useProgressStore } from '../store/useProgressStore';
@@ -11,6 +18,10 @@ import { impact, openExternalLink } from '../telegram/useTelegram';
 interface DevPanelProps {
   onClose: () => void;
 }
+
+type RecheckRow =
+  | RecheckResult
+  | { taskId: string; title: string; error: string };
 
 export function DevPanel({ onClose }: DevPanelProps) {
   const completed = useProgressStore((state) => state.completed);
@@ -29,7 +40,10 @@ export function DevPanel({ onClose }: DevPanelProps) {
   const [prizePreview, setPrizePreview] = useState<string | null>(null);
   const [prizeLink, setPrizeLink] = useState<string | null>(null);
   const [wifeCompleted, setWifeCompleted] = useState<string[]>([]);
+  const [wifeManual, setWifeManual] = useState<string[]>([]);
   const [wifeConfigured, setWifeConfigured] = useState<boolean | null>(null);
+  const [rechecking, setRechecking] = useState(false);
+  const [recheckRows, setRecheckRows] = useState<RecheckRow[]>([]);
   const [inspectTask, setInspectTask] = useState<Task | null>(null);
   const [inspectState, setInspectState] = useState<WifeTaskState | null>(null);
   const [inspectError, setInspectError] = useState<string | null>(null);
@@ -44,6 +58,7 @@ export function DevPanel({ onClose }: DevPanelProps) {
       .then((state) => {
         if (cancelled) return;
         setWifeCompleted(state.completed);
+        setWifeManual(state.manualCompleted);
         setWifeConfigured(state.configured);
       })
       .catch(() => {
@@ -168,6 +183,30 @@ export function DevPanel({ onClose }: DevPanelProps) {
     } finally {
       setInspectLoading(false);
     }
+  };
+
+  const recheckIds = wifeCompleted.filter((taskId) => !wifeManual.includes(taskId));
+
+  const recheckWife = async () => {
+    if (!serverMode || rechecking || recheckIds.length === 0) return;
+    setRechecking(true);
+    setRecheckRows([]);
+
+    const rows: RecheckRow[] = [];
+    for (const taskId of recheckIds) {
+      try {
+        rows.push(await api.recheckWifeTask(taskId));
+      } catch (error) {
+        rows.push({
+          taskId,
+          title: TASK_BY_ID.get(taskId)?.title ?? taskId,
+          error: error instanceof ApiError ? error.code : 'failed',
+        });
+      }
+      setRecheckRows([...rows]);
+    }
+
+    setRechecking(false);
   };
 
   const exitDev = () => {
@@ -298,6 +337,44 @@ export function DevPanel({ onClose }: DevPanelProps) {
               ? 'USER_TELEGRAM_ID не задан — прогресс второго пользователя недоступен.'
               : 'Розовый кружок — задание выполнено женой.'}
           </p>
+
+          {wifeConfigured === true && recheckIds.length > 0 && (
+            <div style={{ marginTop: 10 }}>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                disabled={rechecking}
+                onClick={() => void recheckWife()}
+              >
+                {rechecking
+                  ? 'Переоцениваем…'
+                  : `Переоценить фото жены (${recheckIds.length})`}
+              </button>
+              <p className="dev-note">
+                Запусти один раз после деплоя: сохранённые фото пересчитаются по новым правилам,
+                ниже появится отчёт с минусами.
+              </p>
+
+              {recheckRows.length > 0 && (
+                <div className="dev-list" style={{ marginTop: 10 }}>
+                  {recheckRows.map((row) => (
+                    <div className="dev-row" key={row.taskId}>
+                      <div className="dev-row__main">
+                        {row.title}
+                        <span className="dev-row__sub">
+                          {'error' in row
+                            ? `Ошибка: ${row.error}`
+                            : `${row.oldScore}% → ${row.newScore}%${
+                                row.improved ? ' ↑' : ''
+                              } · ${row.reason}`}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
 
           {LEVELS.map((level) => (
             <div key={level.id}>

@@ -1,14 +1,12 @@
-import { buildVerdictPrompt } from '../../../../shared/aiPrompt';
 import { computeStatuses } from '../../../../shared/progress';
 import { TASK_BY_ID } from '../../../../shared/tasks';
-import type { AiVerdict } from '../../../../shared/types';
+import { evaluatePhoto } from '../../_ai';
 import {
   authenticate,
   json,
   loadState,
   readJson,
   type Ctx,
-  type Env,
 } from '../../_shared';
 
 const MAX_BASE64 = 1_500_000;
@@ -17,90 +15,6 @@ const IMAGE_RE = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=\s]+)$/;
 interface CheckBody {
   image?: string;
   forceFail?: boolean;
-}
-
-function extractText(result: unknown): string {
-  if (typeof result === 'string') return result;
-  const value = result as Record<string, any>;
-  if (typeof value.response === 'string') return value.response;
-  if (typeof value.result?.response === 'string') return value.result.response;
-
-  const content = value.choices?.[0]?.message?.content;
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content
-      .map((part: any) => (typeof part === 'string' ? part : part?.text ?? ''))
-      .join('');
-  }
-  return '';
-}
-
-function parseVerdict(text: string): AiVerdict | null {
-  const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
-  const start = cleaned.indexOf('{');
-  const end = cleaned.lastIndexOf('}');
-  if (start === -1 || end <= start) return null;
-
-  try {
-    const raw = JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>;
-    const score = Number(raw.score);
-    const confidence = Number(raw.confidence);
-    const verdict = raw.verdict === 'pass' || raw.verdict === 'fail' ? raw.verdict : null;
-    const reason = typeof raw.reason === 'string' ? raw.reason.slice(0, 300).trim() : '';
-
-    if (!verdict || !reason || !Number.isFinite(score) || !Number.isFinite(confidence)) {
-      return null;
-    }
-
-    return {
-      score: Math.max(0, Math.min(100, Math.round(score))),
-      verdict,
-      reason,
-      confidence: Math.max(0, Math.min(1, confidence)),
-    };
-  } catch {
-    return null;
-  }
-}
-
-async function askModel(
-  env: Env,
-  model: string,
-  prompt: string,
-  image: string,
-): Promise<string> {
-  const result = await env.AI.run(model, {
-    messages: [
-      {
-        role: 'user',
-        content: [
-          { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: image } },
-        ],
-      },
-    ],
-    max_tokens: 500,
-    temperature: 0.1,
-  });
-  return extractText(result).trim();
-}
-
-async function runVision(env: Env, prompt: string, image: string): Promise<string> {
-  const models = [
-    env.AI_MODEL || '@cf/meta/llama-4-scout-17b-16e-instruct',
-    env.AI_FALLBACK_MODEL || '@cf/meta/llama-3.2-11b-vision-instruct',
-  ];
-
-  let lastError: unknown = null;
-  for (const model of models) {
-    try {
-      const text = await askModel(env, model, prompt, image);
-      if (text) return text;
-    } catch (error) {
-      lastError = error;
-    }
-  }
-  throw lastError ?? new Error('empty_ai_response');
 }
 
 export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Response> => {
@@ -120,14 +34,28 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
 
   try {
     const state = await loadState(env, auth.user.id);
-    if (state.completed.includes(task.id)) {
-      return json({ error: 'already_completed', ...state }, 409);
+    const alreadyCompleted = state.completed.includes(task.id);
+
+    // Повторная загрузка разрешена только для уже выполненного задания:
+    // так можно сделать «работу над ошибками», но нельзя открыть закрытое задание.
+    if (!alreadyCompleted) {
+      const statuses = computeStatuses(state.completed);
+      if (statuses.get(task.id) !== 'available') {
+        return json({ error: 'task_locked' }, 409);
+      }
     }
 
-    const statuses = computeStatuses(state.completed);
-    if (statuses.get(task.id) !== 'available') {
-      return json({ error: 'task_locked' }, 409);
-    }
+    const previous = alreadyCompleted
+      ? await env.DB.prepare(
+          `SELECT score, reason
+           FROM photos
+           WHERE telegram_id = ? AND task_id = ?
+           ORDER BY created_at DESC, rowid DESC
+           LIMIT 1`,
+        )
+          .bind(auth.user.id, task.id)
+          .first<{ score: number; reason: string }>()
+      : null;
 
     // В dev-режиме владелец может принудительно проверить ветку провала.
     if (body?.forceFail && auth.isOwner) {
@@ -138,15 +66,14 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
         reason: 'Dev-режим: принудительный провал проверки.',
         confidence: 0.99,
         forced: true,
+        recheck: alreadyCompleted,
+        previousScore: previous?.score ?? null,
       });
     }
 
-    const prompt = buildVerdictPrompt(task);
-    const text = await runVision(env, prompt, match[0]);
-    const verdict = parseVerdict(text);
-    if (!verdict) return json({ error: 'ai_invalid_response' }, 502);
-
+    const verdict = await evaluatePhoto(env, task, match[0], previous);
     const passed = verdict.verdict === 'pass' && verdict.score >= 70;
+
     if (!passed) {
       return json({
         pass: false,
@@ -154,11 +81,31 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
         verdict: 'fail',
         reason: verdict.reason,
         confidence: verdict.confidence,
+        recheck: alreadyCompleted,
+        previousScore: previous?.score ?? null,
+      });
+    }
+
+    // Уже засчитанное задание не может стать хуже: сохраняем новый кадр,
+    // только если он улучшил результат. Баллы при этом не начисляются повторно.
+    const improved = !alreadyCompleted || !previous || verdict.score > previous.score;
+    if (!improved) {
+      return json({
+        pass: true,
+        score: verdict.score,
+        verdict: 'pass',
+        reason: verdict.reason,
+        confidence: verdict.confidence,
+        completed: true,
+        recheck: true,
+        saved: false,
+        previousScore: previous?.score ?? null,
+        points: 0,
       });
     }
 
     const photoId = crypto.randomUUID();
-    await env.DB.batch([
+    const statements = [
       env.DB.prepare(
         `INSERT INTO photos
            (id, telegram_id, task_id, mime, image, score, verdict, reason, confidence)
@@ -174,12 +121,25 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
         verdict.reason,
         verdict.confidence,
       ),
-      env.DB.prepare(
-        `INSERT OR IGNORE INTO completions
-           (telegram_id, task_id, points, manual, photo_id)
-         VALUES (?, ?, ?, 0, ?)`,
-      ).bind(auth.user.id, task.id, task.points, photoId),
-    ]);
+    ];
+
+    if (alreadyCompleted) {
+      statements.push(
+        env.DB.prepare(
+          'UPDATE completions SET photo_id = ? WHERE telegram_id = ? AND task_id = ?',
+        ).bind(photoId, auth.user.id, task.id),
+      );
+    } else {
+      statements.push(
+        env.DB.prepare(
+          `INSERT OR IGNORE INTO completions
+             (telegram_id, task_id, points, manual, photo_id)
+           VALUES (?, ?, ?, 0, ?)`,
+        ).bind(auth.user.id, task.id, task.points, photoId),
+      );
+    }
+
+    await env.DB.batch(statements);
 
     return json({
       pass: true,
@@ -188,8 +148,11 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
       reason: verdict.reason,
       confidence: verdict.confidence,
       completed: true,
+      recheck: alreadyCompleted,
+      saved: true,
+      previousScore: previous?.score ?? null,
       photoId,
-      points: task.points,
+      points: alreadyCompleted ? 0 : task.points,
     });
   } catch {
     return json({ error: 'ai_unavailable' }, 502);
