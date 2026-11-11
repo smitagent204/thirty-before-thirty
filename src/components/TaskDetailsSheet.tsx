@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import { LEVEL_BY_ID } from '@shared/levels';
 import type { AiVerdict, Task, TaskStatus } from '@shared/types';
@@ -45,6 +45,26 @@ export function TaskDetailsSheet({
   const [acceptedPhoto, setAcceptedPhoto] = useState<PhotoResult | null>(null);
   const timer = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const confetti = useMemo(
+    () =>
+      Array.from({ length: 16 }, (_, index) => {
+        const angle = (Math.PI * 2 * index) / 16 + Math.random() * 0.4;
+        const distance = 48 + Math.random() * 82;
+        return {
+          id: index,
+          x: 50 + Math.cos(angle) * 12,
+          y: 48 + Math.sin(angle) * 9,
+          dx: Math.cos(angle) * distance,
+          dy: Math.sin(angle) * distance - 22,
+          delay: Math.round(Math.random() * 110),
+          duration: 780 + Math.round(Math.random() * 360),
+          size: 4 + Math.random() * 4,
+          color: ['#ffd75e', '#ffe9a8', '#63d471', '#b9f3c1', '#ffffff'][index % 5],
+          spin: 180 + Math.round(Math.random() * 360),
+        };
+      }),
+    [],
+  );
   // Фиксируем на момент открытия: если сервер подтвердит задание, пока лист открыт,
   // не переключаем интерфейс под руками — пользователь сам нажмёт «Забрать».
   const [done] = useState(() => status === 'completed');
@@ -239,7 +259,11 @@ export function TaskDetailsSheet({
                   <h4 className="sheet__section-title">
                     <span aria-hidden="true">📷</span> Подтверждение
                   </h4>
-                  <div className={`dropzone${phase === 'checking' ? ' is-checking' : ''}`}>
+                  <div
+                    className={`dropzone${phase === 'checking' ? ' is-checking' : ''}${
+                      phase === 'pass' ? ' is-accepted' : ''
+                    }`}
+                  >
                     {preview ? (
                       <img className="dropzone__preview" src={preview} alt="Выбранное фото" />
                     ) : (
@@ -252,6 +276,32 @@ export function TaskDetailsSheet({
                           Нажми, чтобы снять или выбрать из галереи
                         </span>
                       </>
+                    )}
+                    {phase === 'pass' && (
+                      <div className="accept-fx" aria-hidden="true">
+                        <div className="accept-fx__confetti">
+                          {confetti.map((piece) => (
+                            <span
+                              key={piece.id}
+                              className="confetti-piece"
+                              style={
+                                {
+                                  '--x': `${piece.x}%`,
+                                  '--y': `${piece.y}%`,
+                                  '--dx': `${piece.dx}px`,
+                                  '--dy': `${piece.dy}px`,
+                                  '--delay': `${piece.delay}ms`,
+                                  '--dur': `${piece.duration}ms`,
+                                  '--size': `${piece.size}px`,
+                                  '--color': piece.color,
+                                  '--spin': `${piece.spin}deg`,
+                                } as CSSProperties
+                              }
+                            />
+                          ))}
+                        </div>
+                        <span className="accept-fx__stamp">✓ Фото принято</span>
+                      </div>
                     )}
                     <input
                       ref={inputRef}
@@ -277,7 +327,12 @@ export function TaskDetailsSheet({
                       aria-live="polite"
                     >
                       <span className="verdict__score">{verdict.score}%</span>
-                      <span>{verdict.reason}</span>
+                      <div className="verdict__body">
+                        {verdict.verdict === 'pass' && (
+                          <strong className="verdict__title">Фото принято</strong>
+                        )}
+                        <span>{verdict.reason}</span>
+                      </div>
                     </div>
                   )}
                 </section>

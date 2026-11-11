@@ -306,6 +306,93 @@
   border-color: rgba(255, 215, 94, 0.5);
 }
 
+.dropzone.is-accepted {
+  border-style: solid;
+  border-color: rgba(99, 212, 113, 0.72);
+  background: rgba(99, 212, 113, 0.06);
+  box-shadow:
+    0 0 0 1px rgba(99, 212, 113, 0.18),
+    0 0 30px rgba(99, 212, 113, 0.16);
+}
+
+.accept-fx {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+
+.accept-fx__confetti {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+
+.confetti-piece {
+  position: absolute;
+  left: var(--x);
+  top: var(--y);
+  width: var(--size);
+  height: calc(var(--size) * 0.62);
+  border-radius: 2px;
+  background: var(--color);
+  opacity: 0;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--color) 65%, transparent);
+  animation: confetti-burst var(--dur) var(--e-out) var(--delay) forwards;
+}
+
+.accept-fx__stamp {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 10px;
+  border: 1.5px solid rgba(99, 212, 113, 0.85);
+  border-radius: 9px;
+  background: rgba(15, 45, 25, 0.84);
+  color: #d9ffe0;
+  font-family: var(--font-display);
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  transform: rotate(-7deg);
+  box-shadow:
+    0 6px 20px rgba(0, 0, 0, 0.45),
+    0 0 18px rgba(99, 212, 113, 0.28);
+  backdrop-filter: blur(6px);
+  animation: accept-stamp 0.5s var(--e-overshoot) both;
+}
+
+@keyframes confetti-burst {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.4) rotate(0);
+  }
+  10%,
+  72% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) scale(1)
+      rotate(var(--spin));
+  }
+}
+
+@keyframes accept-stamp {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.55) rotate(-18deg);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1) rotate(-7deg);
+  }
+}
+
 .photo-input {
   position: absolute;
   inset: 0;
@@ -362,6 +449,20 @@
   flex: 0 0 auto;
   font-family: var(--font-num);
   font-size: 13px;
+}
+
+.verdict__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.verdict__title {
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+  color: #e4ffe8;
 }
 
 /* ─────────────────────────── Chest ─────────────────────────── */
@@ -910,8 +1011,12 @@
   .checking__spinner {
     animation: none;
   }
-  .chest.is-opening .particle {
+  .chest.is-opening .particle,
+  .confetti-piece {
     display: none;
+  }
+  .accept-fx__stamp {
+    animation: none;
   }
 }
 
