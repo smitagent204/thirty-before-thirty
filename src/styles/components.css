@@ -450,7 +450,7 @@
     repeating-linear-gradient(90deg, rgba(0, 0, 0, 0.08) 0 2px, transparent 2px 9px),
     linear-gradient(180deg, #8b5a2b, #5d3a1a);
   box-shadow: inset 0 5px 0 rgba(255, 255, 255, 0.16);
-  transition: transform 280ms var(--e-overshoot);
+  transition: transform 380ms var(--e-overshoot);
   z-index: 3;
 }
 
@@ -543,7 +543,7 @@
 }
 
 .chest.is-opening .particle {
-  animation: particle-burst 1s var(--e-out) forwards;
+  animation: particle-burst 1.25s var(--e-out) forwards;
   animation-delay: var(--delay, 0ms);
 }
 
@@ -557,7 +557,7 @@
 }
 
 .flash.is-on {
-  animation: flash 220ms ease-out;
+  animation: flash 280ms ease-out;
 }
 
 /* ─────────────────────────── Prize card ─────────────────────────── */

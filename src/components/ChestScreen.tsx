@@ -84,10 +84,10 @@ export function ChestScreen({
     const first = window.setTimeout(() => {
       setPhase('opening');
       notify('warning');
-    }, 540);
+    }, 720);
     const second = window.setTimeout(() => {
       void finish();
-    }, 1900);
+    }, 2600);
     timers.current.push(first, second);
   };
 
@@ -190,7 +190,7 @@ export function ChestScreen({
           <button
             type="button"
             className="btn"
-            style={{ marginTop: 4 }}
+            style={{ marginTop: 14 }}
             disabled={!ready || phase !== 'idle'}
             onClick={open}
           >
