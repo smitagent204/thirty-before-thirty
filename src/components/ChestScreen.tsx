@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { TOTAL_POINTS } from '@shared/levels';
 import { ProgressRoadmap } from './ProgressRoadmap';
@@ -37,7 +38,9 @@ export function ChestScreen({
   onOpenChest,
 }: ChestScreenProps) {
   const [phase, setPhase] = useState<Phase>(opened ? 'open' : 'idle');
+  const [flashPos, setFlashPos] = useState({ x: 50, y: 48 });
   const timers = useRef<number[]>([]);
+  const chestRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (opened) setPhase('open');
@@ -80,6 +83,13 @@ export function ChestScreen({
   const open = () => {
     if (!ready || phase !== 'idle') return;
     impact('heavy');
+    const rect = chestRef.current?.getBoundingClientRect();
+    if (rect && window.innerWidth > 0 && window.innerHeight > 0) {
+      setFlashPos({
+        x: ((rect.left + rect.width / 2) / window.innerWidth) * 100,
+        y: ((rect.top + rect.height / 2) / window.innerHeight) * 100,
+      });
+    }
     setPhase('shaking');
     const first = window.setTimeout(() => {
       setPhase('opening');
@@ -135,7 +145,7 @@ export function ChestScreen({
               role="presentation"
               exit={{ opacity: 0, scale: 0.72, y: 26, transition: { duration: 0.3 } }}
             >
-              <div className={chestClass}>
+              <div className={chestClass} ref={chestRef}>
                 <div className="chest__glow" />
                 <div className="chest__lid" />
                 <div className="chest__base">
@@ -173,7 +183,20 @@ export function ChestScreen({
           )}
         </AnimatePresence>
 
-        <div className={phase === 'opening' ? 'flash is-on' : 'flash'} aria-hidden="true" />
+        {phase === 'opening' &&
+          createPortal(
+            <div
+              className="chest-flash"
+              style={
+                {
+                  '--fx-x': `${flashPos.x}%`,
+                  '--fx-y': `${flashPos.y}%`,
+                } as CSSProperties
+              }
+              aria-hidden="true"
+            />,
+            document.body,
+          )}
 
         {phase !== 'open' && (
           <div style={{ width: '100%', marginTop: 6 }}>
