@@ -525,7 +525,8 @@
 }
 
 .chest.is-shaking {
-  animation: chest-shake 0.52s ease-in-out;
+  /* Три отдельных «толчка» с паузами между ними. */
+  animation: chest-shake 0.33s ease-in-out 3;
 }
 
 .particle {
@@ -806,23 +807,21 @@
 
 @keyframes chest-shake {
   0%,
+  62%,
   100% {
     transform: translateX(0) rotate(0);
   }
-  15% {
-    transform: translateX(-5px) rotate(-1.6deg);
+  12% {
+    transform: translateX(-6px) rotate(-2deg);
   }
-  30% {
-    transform: translateX(4px) rotate(1.4deg);
+  25% {
+    transform: translateX(5px) rotate(1.6deg);
   }
-  45% {
+  38% {
     transform: translateX(-4px) rotate(-1.2deg);
   }
-  60% {
-    transform: translateX(3px) rotate(1deg);
-  }
-  75% {
-    transform: translateX(-2px) rotate(-0.6deg);
+  50% {
+    transform: translateX(2px) rotate(0.6deg);
   }
 }
 
@@ -854,6 +853,7 @@
 
 @media (prefers-reduced-motion: reduce) {
   .chest.is-ready .chest__lock,
+  .chest.is-shaking,
   .checking__spinner {
     animation: none;
   }

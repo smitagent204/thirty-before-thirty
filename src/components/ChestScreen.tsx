@@ -84,10 +84,10 @@ export function ChestScreen({
     const first = window.setTimeout(() => {
       setPhase('opening');
       notify('warning');
-    }, 720);
+    }, 1000);
     const second = window.setTimeout(() => {
       void finish();
-    }, 2600);
+    }, 2400);
     timers.current.push(first, second);
   };
 
