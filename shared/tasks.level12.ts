@@ -110,7 +110,7 @@ export const LEVEL_1_2_TASKS: Task[] = [
   {
     id: 'l1-3',
     level: 1,
-    order: 3,
+    order: 4,
     points: 1,
     emoji: '🎲',
     title: 'Вечер настолок без экранов',
@@ -158,7 +158,7 @@ export const LEVEL_1_2_TASKS: Task[] = [
   {
     id: 'l1-4',
     level: 1,
-    order: 4,
+    order: 3,
     points: 1,
     emoji: '👗',
     title: 'Домашний подиум «Гардероб вне декрета»',

@@ -30,6 +30,9 @@ CREATE TABLE IF NOT EXISTS photos (
   appealed_at TEXT,
   appeal_text TEXT,
   appeal_prev_score INTEGER,
+  -- Снимок минусов и ответ ИИ на момент апелляции — чтобы её можно было открыть позже.
+  appeal_prev_deductions TEXT,
+  appeal_reason TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 

@@ -38,6 +38,8 @@ export interface RecheckResult {
   kept?: boolean;
   candidateReason?: string;
   candidateDeductions?: AiDeduction[];
+  /** Переоценка ухудшила оспоренное фото — апелляцию можно подать заново. */
+  appealReset?: boolean;
 }
 
 export interface DismissResult {
@@ -75,6 +77,12 @@ export interface PhotoResult {
   appealedAt?: string | null;
   /** Оценка до апелляции. */
   appealScoreBefore?: number | null;
+  /** Пояснение человека из апелляции. */
+  appealText?: string | null;
+  /** Минусы, которые были до пересмотра. */
+  appealDeductions?: AiDeduction[];
+  /** Что ИИ ответил на апелляцию. */
+  appealReason?: string | null;
   createdAt: string;
 }
 
@@ -84,8 +92,14 @@ export interface AppealResult {
   scoreBefore: number;
   score: number;
   verdict: string;
+  /** Исходная похвала — она не меняется после апелляции. */
   reason: string;
   deductions: AiDeduction[];
+  /** Ответ ИИ на апелляцию — показывается отдельно. */
+  appealReason: string;
+  appealText: string;
+  /** Минусы до пересмотра. */
+  appealDeductions: AiDeduction[];
   /** Сколько процентов удалось вернуть. */
   relieved: number;
   applied: 'full' | 'partial' | 'minimum';

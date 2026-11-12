@@ -12,7 +12,8 @@ export const onRequestGet = async ({ request, env, params }: Ctx): Promise<Respo
   try {
     const row = await env.DB.prepare(
       `SELECT mime, image, score, verdict, reason, confidence, deductions,
-              appealed_at, appeal_prev_score, created_at
+              appealed_at, appeal_prev_score, appeal_text,
+              appeal_prev_deductions, appeal_reason, created_at
        FROM photos
        WHERE telegram_id = ? AND task_id = ?
        ORDER BY created_at DESC, rowid DESC
@@ -29,6 +30,9 @@ export const onRequestGet = async ({ request, env, params }: Ctx): Promise<Respo
         deductions: string;
         appealed_at: string | null;
         appeal_prev_score: number | null;
+        appeal_text: string | null;
+        appeal_prev_deductions: string | null;
+        appeal_reason: string | null;
         created_at: string;
       }>();
 
@@ -43,6 +47,9 @@ export const onRequestGet = async ({ request, env, params }: Ctx): Promise<Respo
       confidence: row.confidence,
       appealedAt: row.appealed_at,
       appealScoreBefore: row.appeal_prev_score,
+      appealText: row.appeal_text,
+      appealDeductions: parseStoredDeductions(row.appeal_prev_deductions),
+      appealReason: row.appeal_reason,
       createdAt: row.created_at,
     });
   } catch {

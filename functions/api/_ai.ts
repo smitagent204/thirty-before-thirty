@@ -391,14 +391,15 @@ async function verifyDeductions(
   }
 }
 
-const APPEAL_MIN_RELIEF = 1;
+/** Даже при полном несогласии ИИ каждый минус уменьшается хотя бы на 1%. */
+const APPEAL_MIN_PER_ITEM = 1;
 
 export type AppealApplied = 'full' | 'partial' | 'minimum';
 
 export interface AppealOutcome extends AiVerdict {
   /** Сколько процентов удалось вернуть. */
   relieved: number;
-  /** full — все минусы сняты, partial — часть, minimum — гарантированный 1%. */
+  /** full — все минусы сняты, partial — часть, minimum — ИИ не согласился. */
   applied: AppealApplied;
 }
 
@@ -406,28 +407,12 @@ function totalPercent(items: AiDeduction[]): number {
   return items.reduce((sum, item) => sum + item.percent, 0);
 }
 
-/** Уменьшает самые крупные минусы, пока сумма не дойдёт до цели. */
-function trimDeductions(items: AiDeduction[], target: number): AiDeduction[] {
-  const next = items.map((item) => ({ ...item }));
-  let total = totalPercent(next);
-  const order = [...next].sort((a, b) => b.percent - a.percent);
-
-  for (const item of order) {
-    if (total <= target) break;
-    const cut = Math.min(item.percent, total - target);
-    item.percent -= cut;
-    total -= cut;
-  }
-
-  return next.filter((item) => item.percent > 0);
-}
-
 /**
  * Апелляция: человек просит пересмотреть все минусы разом. По каждому пункту
  * модель возвращает reduce — сколько процентных пунктов вернуть. Это может быть
  * любое число от 0 до текущего штрафа: не только «снять всё» или «половину».
- * Новые минусы и рост штрафа невозможны, а минимум 1% возвращается всегда —
- * единственная попытка не должна сгорать впустую.
+ * Новые минусы и рост штрафа невозможны, а каждый минус уменьшается хотя бы на
+ * 1% — единственная попытка не должна сгорать впустую.
  */
 export async function appealVerdict(
   env: Env,
@@ -446,6 +431,7 @@ export async function appealVerdict(
     await runVision(env, buildAppealPrompt(task, claims, note), image),
   );
 
+  let modelRelief = 0;
   const reduced: AiDeduction[] = [];
   current.forEach((item, index) => {
     const answer = answers.get(claims[index].id);
@@ -460,20 +446,23 @@ export async function appealVerdict(
 
     // Модель не может вернуть больше, чем было списано, или уйти в минус.
     relief = Math.max(0, Math.min(item.percent, relief));
+    modelRelief += relief;
+
+    // Даже если ИИ не согласен, каждый оставшийся минус уменьшается на 1%:
+    // штраф не должен остаться нетронутым ни по одному замечанию.
+    if (relief < APPEAL_MIN_PER_ITEM) {
+      relief = Math.min(item.percent, APPEAL_MIN_PER_ITEM);
+    }
+
     const percent = item.percent - relief;
     if (percent > 0) reduced.push({ ...item, percent });
   });
 
   const before = totalPercent(current);
-  let next = reduced;
-  let after = totalPercent(next);
-  let applied: AppealApplied = after === 0 ? 'full' : after < before ? 'partial' : 'minimum';
-
-  if (before > 0 && after > before - APPEAL_MIN_RELIEF) {
-    next = trimDeductions(next, Math.max(0, before - APPEAL_MIN_RELIEF));
-    after = totalPercent(next);
-    applied = 'minimum';
-  }
+  const next = reduced;
+  const after = totalPercent(next);
+  const applied: AppealApplied =
+    after === 0 ? 'full' : modelRelief > 0 ? 'partial' : 'minimum';
 
   const score = Math.max(0, Math.min(100, 100 - after));
   const fallback =
@@ -537,7 +526,8 @@ export async function evaluatePhoto(
         ...raw,
         deductions: verified.deductions,
         allVisible: verified.deductions.length === 0,
-        reason: verified.reason ?? raw.reason,
+        // Похвалу оставляем из первого прохода: перепроверка говорит о минусах,
+        // и её служебный текст не должен попадать в карточку вместо похвалы.
       };
       verdict = buildVerdict(task, raw);
     }

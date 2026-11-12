@@ -60,19 +60,21 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
 
     const updated = (await env.DB.prepare(
       `UPDATE photos
-       SET score = ?, verdict = ?, reason = ?, confidence = ?, deductions = ?,
-           appealed_at = ?, appeal_text = ?, appeal_prev_score = ?
+       SET score = ?, verdict = ?, confidence = ?, deductions = ?,
+           appealed_at = ?, appeal_text = ?, appeal_prev_score = ?,
+           appeal_prev_deductions = ?, appeal_reason = ?
        WHERE id = ? AND appealed_at IS NULL`,
     )
       .bind(
         verdict.score,
         verdict.verdict,
-        verdict.reason,
         verdict.confidence,
         JSON.stringify(verdict.deductions ?? []),
         appealedAt,
         note,
         photo.score,
+        photo.deductions,
+        verdict.reason,
         photo.id,
       )
       .run()) as { meta?: { changes?: number } };
@@ -88,8 +90,12 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
       scoreBefore: photo.score,
       score: verdict.score,
       verdict: verdict.verdict,
-      reason: verdict.reason,
+      // Похвала остаётся исходной: ответ на апелляцию — отдельное сообщение.
+      reason: photo.reason,
       deductions: verdict.deductions ?? [],
+      appealReason: verdict.reason,
+      appealText: note,
+      appealDeductions: current,
       relieved: verdict.relieved,
       applied: verdict.applied,
       appealedAt,

@@ -439,6 +439,11 @@ export function DevPanel({ onClose }: DevPanelProps) {
                                 .join('; ')}
                             </span>
                           )}
+                          {row.appealReset && (
+                            <span className="dev-row__sub">
+                              Апелляция сброшена — можно подать заново
+                            </span>
+                          )}
                         </div>
                       </div>
                     );

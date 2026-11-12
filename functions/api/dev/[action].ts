@@ -124,7 +124,8 @@ async function wifeTask(ctx: Ctx): Promise<Response> {
 
   const photo = await ctx.env.DB.prepare(
     `SELECT mime, image, score, verdict, reason, confidence, deductions,
-            appealed_at, appeal_prev_score, created_at
+            appealed_at, appeal_prev_score, appeal_text,
+            appeal_prev_deductions, appeal_reason, created_at
      FROM photos
      WHERE telegram_id = ? AND task_id = ?
      ORDER BY created_at DESC, rowid DESC
@@ -141,6 +142,9 @@ async function wifeTask(ctx: Ctx): Promise<Response> {
       deductions: string;
       appealed_at: string | null;
       appeal_prev_score: number | null;
+      appeal_text: string | null;
+      appeal_prev_deductions: string | null;
+      appeal_reason: string | null;
       created_at: string;
     }>();
 
@@ -158,6 +162,9 @@ async function wifeTask(ctx: Ctx): Promise<Response> {
           confidence: photo.confidence,
           appealedAt: photo.appealed_at,
           appealScoreBefore: photo.appeal_prev_score,
+          appealText: photo.appeal_text,
+          appealDeductions: parseStoredDeductions(photo.appeal_prev_deductions),
+          appealReason: photo.appeal_reason,
           createdAt: photo.created_at,
         }
       : null,
@@ -181,7 +188,7 @@ async function recheckWifeTask(ctx: Ctx): Promise<Response> {
   if (!completion) return json({ error: 'task_not_completed' }, 404);
 
   const photo = await ctx.env.DB.prepare(
-    `SELECT id, mime, image, score, verdict, reason, deductions
+    `SELECT id, mime, image, score, verdict, reason, deductions, appealed_at
      FROM photos
      WHERE telegram_id = ? AND task_id = ?
      ORDER BY created_at DESC, rowid DESC
@@ -196,6 +203,7 @@ async function recheckWifeTask(ctx: Ctx): Promise<Response> {
       verdict: string;
       reason: string;
       deductions: string;
+      appealed_at: string | null;
     }>();
   if (!photo) return json({ error: 'photo_not_found' }, 404);
 
@@ -223,9 +231,17 @@ async function recheckWifeTask(ctx: Ctx): Promise<Response> {
       });
     }
 
+    // Если фото уже оспаривалось, а переоценка сделала его хуже, старый
+    // пересмотр больше не актуален: снимаем отметку — апелляцию можно подать заново.
+    const appealReset = Boolean(photo.appealed_at) && verdict.score < photo.score;
+
     await ctx.env.DB.prepare(
       `UPDATE photos
        SET score = ?, verdict = ?, reason = ?, confidence = ?, deductions = ?
+       ${appealReset
+         ? `, appealed_at = NULL, appeal_text = NULL, appeal_prev_score = NULL,
+              appeal_prev_deductions = NULL, appeal_reason = NULL`
+         : ''}
        WHERE id = ?`,
     )
       .bind(
@@ -248,6 +264,7 @@ async function recheckWifeTask(ctx: Ctx): Promise<Response> {
       reason: verdict.reason,
       deductions: verdict.deductions ?? [],
       improved: verdict.score > photo.score,
+      appealReset,
     });
   } catch {
     return json({ error: 'ai_unavailable' }, 502);

@@ -3,13 +3,7 @@ import { motion } from 'framer-motion';
 import { LEVEL_BY_ID } from '@shared/levels';
 import { APPEAL_MAX_CHARS, type AiDeduction, type AiVerdict, type Task, type TaskStatus } from '@shared/types';
 import { impact, notify } from '../telegram/useTelegram';
-import {
-  api,
-  ApiError,
-  hasTelegramAuth,
-  type AppealResult,
-  type PhotoResult,
-} from '../api/client';
+import { api, ApiError, hasTelegramAuth, type PhotoResult } from '../api/client';
 import { compressPhoto } from '../lib/photo';
 import { invalidatePhoto, loadPhoto } from '../api/photoCache';
 import { ManualApprovalSheet } from './ManualApprovalSheet';
@@ -63,7 +57,7 @@ export function TaskDetailsSheet({
   const [appealText, setAppealText] = useState('');
   const [appealBusy, setAppealBusy] = useState(false);
   const [appealError, setAppealError] = useState<string | null>(null);
-  const [appealResult, setAppealResult] = useState<AppealResult | null>(null);
+  const [appealDetailsOpen, setAppealDetailsOpen] = useState(false);
   const timer = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const serverAuth = hasTelegramAuth();
@@ -237,7 +231,6 @@ export function TaskDetailsSheet({
   const startAppeal = () => {
     setAppealOpen(true);
     setAppealError(null);
-    setAppealResult(null);
     impact('light');
   };
 
@@ -257,7 +250,6 @@ export function TaskDetailsSheet({
       const result = await api.appeal(task.id, text);
       // Оценка и минусы изменились — старое фото в кэше больше не актуально.
       invalidatePhoto(task.id);
-      setAppealResult(result);
       setAppealOpen(false);
       setAppealText('');
       setAcceptedPhoto((prev) =>
@@ -266,10 +258,14 @@ export function TaskDetailsSheet({
               ...prev,
               score: result.score,
               verdict: result.verdict,
-              reason: result.reason,
+              // Похвала от пересмотра не меняется.
+              reason: prev.reason ?? result.reason,
               deductions: result.deductions,
               appealedAt: result.appealedAt,
               appealScoreBefore: result.scoreBefore,
+              appealText: result.appealText,
+              appealDeductions: result.appealDeductions,
+              appealReason: result.appealReason,
             }
           : prev,
       );
@@ -397,21 +393,56 @@ export function TaskDetailsSheet({
                       compact
                     />
 
-                    {appealResult ? (
-                      <div className="appeal-note appeal-note--result" aria-live="polite">
+                    {acceptedPhoto.appealedAt ? (
+                      <div className="appeal-note appeal-note--result">
                         <p className="appeal-note__summary">
-                          Результат пересмотрен: {appealResult.scoreBefore}% →{' '}
-                          {appealResult.score}%
+                          Результат пересмотрен
+                          {typeof acceptedPhoto.appealScoreBefore === 'number'
+                            ? `: ${acceptedPhoto.appealScoreBefore}% → ${acceptedPhoto.score}%`
+                            : ''}
                         </p>
-                        <p className="appeal-note__text">{appealResult.reason}</p>
+                        <button
+                          type="button"
+                          className="appeal-note__toggle"
+                          onClick={() => setAppealDetailsOpen((value) => !value)}
+                          aria-expanded={appealDetailsOpen}
+                        >
+                          {appealDetailsOpen
+                            ? 'Скрыть апелляцию'
+                            : 'Посмотреть апелляцию'}
+                        </button>
+                        {appealDetailsOpen && (
+                          <div className="appeal-details">
+                            {(acceptedPhoto.appealDeductions?.length ?? 0) > 0 && (
+                              <>
+                                <p className="appeal-details__title">
+                                  Замечания до апелляции
+                                </p>
+                                <VerdictDetails
+                                  deductions={acceptedPhoto.appealDeductions}
+                                  compact
+                                />
+                              </>
+                            )}
+                            {acceptedPhoto.appealText && (
+                              <>
+                                <p className="appeal-details__title">Ваше пояснение</p>
+                                <p className="appeal-details__quote">
+                                  «{acceptedPhoto.appealText}»
+                                </p>
+                              </>
+                            )}
+                            {acceptedPhoto.appealReason && (
+                              <>
+                                <p className="appeal-details__title">Ответ на апелляцию</p>
+                                <p className="appeal-details__text">
+                                  {acceptedPhoto.appealReason}
+                                </p>
+                              </>
+                            )}
+                          </div>
+                        )}
                       </div>
-                    ) : acceptedPhoto.appealedAt ? (
-                      <p className="appeal-note">
-                        Апелляция рассмотрена
-                        {typeof acceptedPhoto.appealScoreBefore === 'number'
-                          ? ` · было ${acceptedPhoto.appealScoreBefore}%`
-                          : ''}
-                      </p>
                     ) : (acceptedPhoto.deductions?.length ?? 0) > 0 ? (
                       appealOpen ? (
                         <div className="appeal-form">
