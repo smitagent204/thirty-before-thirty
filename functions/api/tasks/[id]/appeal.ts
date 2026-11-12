@@ -49,6 +49,12 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
     const current = parseStoredDeductions(photo.deductions);
     if (current.length === 0) return json({ error: 'nothing_to_appeal' }, 409);
 
+    // Сомнение в оригинальности словами не снимается: его закрывает только
+    // второй кадр. Попытку апелляции на такое замечание не тратим.
+    if (current.every((item) => item.kind === 'origin')) {
+      return json({ error: 'origin_only' }, 409);
+    }
+
     const verdict = await appealVerdict(
       env,
       task,

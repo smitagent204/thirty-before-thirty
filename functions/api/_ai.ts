@@ -238,6 +238,25 @@ export function applyDeductions(
     .filter((item): item is AiDeduction => Boolean(item));
 }
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Модель иногда цитирует в ответе служебные идентификаторы рубрики — «чтобы
+ * замечание no_screens было снято». Человек таких названий не знает, поэтому
+ * подменяем их формулировкой требования, а прочие id — словом «пункт».
+ */
+export function humanizeIds(text: string, task: Task): string {
+  let result = text;
+  for (const requirement of task.rubric.required) {
+    if (!requirement.id) continue;
+    const pattern = new RegExp(`(?<![\\w-])${escapeRegExp(requirement.id)}(?![\\w-])`, 'gi');
+    result = result.replace(pattern, `«${requirement.label}»`);
+  }
+  return result.replace(/(?<![\w-])[a-z][a-z0-9]*(?:_[a-z0-9]+)+(?![\w-])/gi, 'этот пункт');
+}
+
 function buildVerdict(
   task: Task,
   raw: RawVerdict,
@@ -247,7 +266,7 @@ function buildVerdict(
     return {
       score: INVALID_SCORE,
       verdict: 'fail',
-      reason: raw.reason,
+      reason: humanizeIds(raw.reason, task),
       confidence: raw.confidence,
       deductions: [],
     };
@@ -261,7 +280,7 @@ function buildVerdict(
     return {
       score: INVALID_SCORE,
       verdict: 'fail',
-      reason: raw.sourceNote ?? SOURCE_DOWNLOADED_REASON,
+      reason: humanizeIds(raw.sourceNote ?? SOURCE_DOWNLOADED_REASON, task),
       confidence: raw.confidence,
       deductions: [
         { kind: 'origin' as const, label: 'кадр скачан из интернета, а не снят самим', percent: 100 },
@@ -334,7 +353,7 @@ function buildVerdict(
   return {
     score,
     verdict: passed ? 'pass' : 'fail',
-    reason: raw.reason,
+    reason: humanizeIds(raw.reason, task),
     confidence: raw.confidence,
     deductions: finalDeductions,
   };
@@ -590,6 +609,9 @@ function totalPercent(items: AiDeduction[]): number {
  * любое число от 0 до текущего штрафа: не только «снять всё» или «половину».
  * Новые минусы и рост штрафа невозможны, а каждый минус уменьшается хотя бы на
  * 1% — единственная попытка не должна сгорать впустую.
+ *
+ * Сомнение в оригинальности в споре не участвует: словами его не опровергнуть,
+ * его снимает только второй кадр с другого ракурса.
  */
 export async function appealVerdict(
   env: Env,
@@ -598,7 +620,26 @@ export async function appealVerdict(
   current: AiDeduction[],
   note: string,
 ): Promise<AppealOutcome> {
-  const claims: AppealClaim[] = current.map((item, index) => ({
+  const locked = current.filter((item) => item.kind === 'origin');
+  const appealable = current.filter((item) => item.kind !== 'origin');
+  const originNote =
+    'Сомнение в оригинальности кадра словами не снимается: сними тот же объект ещё раз с другого ракурса — и фото перепроверят.';
+
+  // Спорить не о чем: остались только минусы за происхождение кадра.
+  if (appealable.length === 0) {
+    const lockedScore = Math.max(0, Math.min(100, 100 - totalPercent(current)));
+    return {
+      score: lockedScore,
+      verdict: lockedScore >= PASS_SCORE ? 'pass' : 'fail',
+      reason: originNote,
+      confidence: 0.75,
+      deductions: current,
+      relieved: 0,
+      applied: 'minimum',
+    };
+  }
+
+  const claims: AppealClaim[] = appealable.map((item, index) => ({
     id: item.id ?? `item-${index}`,
     label: item.label,
     percent: item.percent,
@@ -609,7 +650,7 @@ export async function appealVerdict(
   );
 
   // Сколько вернул первый проход по каждому пункту.
-  const reliefs = current.map((item, index) => {
+  const reliefs = appealable.map((item, index) => {
     const answer = answers.get(claims[index].id);
     let relief = 0;
     if (answer?.reduce !== undefined) {
@@ -626,7 +667,7 @@ export async function appealVerdict(
   // Первый проход отказал хотя бы по одному пункту — перечитываем только эти
   // пункты узким вопросом: подтверждает ли кадр довод человека. Иначе честная
   // апелляция упирается в гарантированный 1%.
-  const refused = current
+  const refused = appealable
     .map((item, index) => ({ item, index }))
     .filter(({ index }) => reliefs[index] < APPEAL_MIN_PER_ITEM);
   if (refused.length > 0) {
@@ -657,8 +698,16 @@ export async function appealVerdict(
 
   let modelRelief = 0;
   const reduced: AiDeduction[] = [];
-  current.forEach((item, index) => {
-    let relief = reliefs[index];
+  let appealIndex = 0;
+  for (const item of current) {
+    // Минус за происхождение кадра остаётся как есть и в споре не участвует.
+    if (item.kind === 'origin') {
+      reduced.push(item);
+      continue;
+    }
+
+    let relief = reliefs[appealIndex];
+    appealIndex += 1;
     modelRelief += relief;
 
     // Даже если ИИ не согласен, каждый оставшийся минус уменьшается на 1%:
@@ -669,7 +718,7 @@ export async function appealVerdict(
 
     const percent = item.percent - relief;
     if (percent > 0) reduced.push({ ...item, percent });
-  });
+  }
 
   const before = totalPercent(current);
   const next = reduced;
@@ -685,10 +734,15 @@ export async function appealVerdict(
         ? 'Спасибо за пояснение — часть замечаний снята, оценка стала выше.'
         : 'Спасибо за пояснение. Полностью снять замечание не удалось, но я уменьшил штраф.';
 
+  // Если среди минусов было сомнение в оригинальности, человек должен понять,
+  // почему оно осталось: апелляция его не касается.
+  const answer = humanizeIds(reason ?? fallback, task);
+  const finalReason = locked.length > 0 ? `${answer} ${originNote}` : answer;
+
   return {
     score,
     verdict: score >= PASS_SCORE ? 'pass' : 'fail',
-    reason: reason ?? fallback,
+    reason: finalReason,
     confidence: 0.75,
     deductions: next,
     relieved: before - after,
@@ -751,7 +805,7 @@ export async function proveOriginality(
 ): Promise<ProofOutcome> {
   const outcome = parseProof(await runVision(env, buildProofPrompt(task), images));
   if (!outcome) throw new Error('ai_invalid_response');
-  return outcome;
+  return { ...outcome, reason: humanizeIds(outcome.reason, task) };
 }
 
 interface OriginCheck {
@@ -834,12 +888,21 @@ function applyOrigin(raw: RawVerdict, origin: OriginCheck): RawVerdict {
 }
 
 /** Единая проверка фото для обычной загрузки, повторной попытки и переоценки. */
+export interface EvaluateOptions {
+  /**
+   * Оригинальность уже доказана вторым ракурсом: не подозреваем кадр и не
+   * тратим ещё один вызов на проверку происхождения.
+   */
+  trustOrigin?: boolean;
+}
+
 export async function evaluatePhoto(
   env: Env,
   task: Task,
   image: string,
   previous?: PreviousAttempt | null,
   meta?: PhotoMeta | null,
+  options: EvaluateOptions = {},
 ): Promise<AiVerdict> {
   const prompt = buildVerdictPrompt(task, previous);
   let raw = parseVerdict(await runVision(env, prompt, image));
@@ -866,6 +929,10 @@ export async function evaluatePhoto(
     }
   }
 
+  if (options.trustOrigin) {
+    raw = { ...raw, source: 'own', sourceConfidence: 1, sourceNote: null };
+  }
+
   let verdict = buildVerdict(task, raw);
 
   // Второй проход только по заявленным минусам: убирает ложные «нет объекта»,
@@ -887,7 +954,7 @@ export async function evaluatePhoto(
   // Третий взгляд — только происхождение кадра. Основной вердикт занят рубрикой
   // и пропускает каталожные снимки, поэтому для проходящих фото спрашиваем
   // отдельно и узко. Явные провалы не проверяем: лишний вызов ничего не даст.
-  if (!raw.invalid && verdict.verdict === 'pass') {
+  if (!raw.invalid && verdict.verdict === 'pass' && !options.trustOrigin) {
     const origin = await checkOrigin(env, task, image, meta);
     if (origin) {
       raw = applyOrigin(raw, origin);

@@ -118,6 +118,23 @@ export interface ProofResult {
   proofAt: string;
 }
 
+/**
+ * Ответ проверки с доказательством для ещё не сохранённого кадра. Поля
+ * результата приходят только когда второй ракурс принят.
+ */
+export interface ProofCheckResult {
+  accepted: boolean;
+  reason?: string;
+  proofReason?: string;
+  pass?: boolean;
+  score?: number;
+  verdict?: string;
+  confidence?: number;
+  deductions?: AiDeduction[];
+  saved?: boolean;
+  points?: number;
+}
+
 export interface AppealResult {
   taskId: string;
   title: string;
@@ -255,5 +272,27 @@ export const api = {
     request<ProofResult>(`/api/tasks/${encodeURIComponent(taskId)}/proof`, {
       method: 'POST',
       body: JSON.stringify({ image, fingerprint: fingerprint || undefined }),
+    }),
+
+  /** Доказательство для кадра, который ещё не сохранён: оба снимка в одном запросе. */
+  proofCheck: (
+    taskId: string,
+    image: string,
+    proof: string,
+    options: {
+      fingerprint?: string;
+      proofFingerprint?: string;
+      meta?: PhotoMeta | null;
+    } = {},
+  ) =>
+    request<ProofCheckResult>(`/api/tasks/${encodeURIComponent(taskId)}/proof-check`, {
+      method: 'POST',
+      body: JSON.stringify({
+        image,
+        proof,
+        fingerprint: options.fingerprint || undefined,
+        proofFingerprint: options.proofFingerprint || undefined,
+        meta: options.meta ?? undefined,
+      }),
     }),
 };

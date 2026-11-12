@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import { LEVEL_BY_ID } from '@shared/levels';
-import { APPEAL_MAX_CHARS, type AiDeduction, type AiVerdict, type Task, type TaskStatus } from '@shared/types';
+import {
+  APPEAL_MAX_CHARS,
+  type AiDeduction,
+  type AiVerdict,
+  type PhotoMeta,
+  type Task,
+  type TaskStatus,
+} from '@shared/types';
 import { impact, notify } from '../telegram/useTelegram';
 import { api, ApiError, hasTelegramAuth, type PhotoResult } from '../api/client';
 import { compressPhoto } from '../lib/photo';
@@ -63,6 +70,11 @@ export function TaskDetailsSheet({
   const [proofPreview, setProofPreview] = useState<string | null>(null);
   const [proofBusy, setProofBusy] = useState(false);
   const [proofError, setProofError] = useState<string | null>(null);
+  // Кадр, побывавший в проверке: забракованные фото на сервере не хранятся,
+  // поэтому для доказательства оригинальности держим сжатый снимок здесь.
+  const [checkedImage, setCheckedImage] = useState<string | null>(null);
+  const [checkedFingerprint, setCheckedFingerprint] = useState<string | null>(null);
+  const [checkedMeta, setCheckedMeta] = useState<PhotoMeta | null>(null);
   const timer = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const proofInputRef = useRef<HTMLInputElement>(null);
@@ -133,6 +145,14 @@ export function TaskDetailsSheet({
     setFileName(next.name);
     setPhase('idle');
     setVerdict(null);
+    setCheckedImage(null);
+    setCheckedFingerprint(null);
+    setCheckedMeta(null);
+    setProofOpen(false);
+    setProofFile(null);
+    setProofError(null);
+    if (proofPreview) URL.revokeObjectURL(proofPreview);
+    setProofPreview(null);
   };
 
   const checkPhoto = async () => {
@@ -171,6 +191,11 @@ export function TaskDetailsSheet({
 
     try {
       const { image, fingerprint, meta } = await compressPhoto(file);
+      // Запоминаем кадр до проверки: если его забракуют как скачанный,
+      // доказать оригинальность можно будет прямо на экране провала.
+      setCheckedImage(image);
+      setCheckedFingerprint(fingerprint);
+      setCheckedMeta(meta);
       const result = await api.check(task.id, image, {
         forceFail: isDev && forceFail,
         fingerprint,
@@ -299,6 +324,8 @@ export function TaskDetailsSheet({
             ? 'Для этого фото апелляция уже использована.'
             : error.code === 'nothing_to_appeal'
               ? 'Снимать нечего: замечаний к фото нет.'
+              : error.code === 'origin_only'
+                ? 'Сомнение в оригинальности словами не снимается — сними второй ракурс по кнопке «Доказать, что фото моё».'
               : error.code === 'appeal_too_long'
                 ? `Слишком длинное пояснение — максимум ${APPEAL_MAX_CHARS} символов.`
                 : error.code === 'ai_unavailable'
@@ -334,6 +361,14 @@ export function TaskDetailsSheet({
     setProofError(null);
   };
 
+  const resetProofForm = () => {
+    setProofOpen(false);
+    setProofFile(null);
+    setProofError(null);
+    if (proofPreview) URL.revokeObjectURL(proofPreview);
+    setProofPreview(null);
+  };
+
   const submitProof = async () => {
     if (!proofFile || proofBusy) return;
     setProofBusy(true);
@@ -342,13 +377,59 @@ export function TaskDetailsSheet({
 
     try {
       const { image, fingerprint } = await compressPhoto(proofFile);
+
+      // Кадр не сохранён (его забраковали) — доказываем и проверяем одним
+      // запросом: отклонённые фото на сервере не лежат.
+      if (!showingAcceptedPhoto) {
+        if (!checkedImage) {
+          setProofError('Не нашли проверенный кадр. Загрузи фото заново.');
+          notify('error');
+          return;
+        }
+
+        const checked = await api.proofCheck(task.id, checkedImage, image, {
+          fingerprint: checkedFingerprint ?? undefined,
+          proofFingerprint: fingerprint,
+          meta: checkedMeta,
+        });
+
+        if (!checked.accepted) {
+          setProofError(
+            checked.reason ?? 'Кадры не совпали. Сними тот же объект с другой точки.',
+          );
+          notify('error');
+          return;
+        }
+
+        resetProofForm();
+        setVerdict({
+          score: checked.score ?? 0,
+          verdict: checked.pass ? 'pass' : 'fail',
+          reason: checked.reason ?? '',
+          confidence: checked.confidence ?? 0.8,
+          deductions: checked.deductions ?? [],
+        });
+
+        if (checked.pass) {
+          invalidatePhoto(task.id);
+          setCheckedImage(null);
+          setCheckedFingerprint(null);
+          setCheckedMeta(null);
+          setPhase('pass');
+          notify('success');
+          await onChecked();
+        } else {
+          // Оригинальность больше не под сомнением: остались только замечания
+          // по содержанию кадра.
+          setPhase('fail');
+          notify('error');
+        }
+        return;
+      }
+
       const result = await api.proof(task.id, image, fingerprint);
       invalidatePhoto(task.id);
-      setProofOpen(false);
-      setProofFile(null);
-      setProofError(null);
-      if (proofPreview) URL.revokeObjectURL(proofPreview);
-      setProofPreview(null);
+      resetProofForm();
       // Основное фото остаётся прежним — меняются только баллы и список минусов.
       setAcceptedPhoto((prev) =>
         prev
@@ -423,6 +504,22 @@ export function TaskDetailsSheet({
   // Минус за сомнение в оригинальности закрывается отдельно от апелляции.
   const originDeduction =
     acceptedPhoto?.deductions?.find((item) => item.kind === 'origin') ?? null;
+
+  // Апелляция касается только содержания кадра: происхождение доказывается
+  // вторым снимком, поэтому такие минусы в споре не участвуют.
+  const appealableCount =
+    acceptedPhoto?.deductions?.filter((item) => item.kind !== 'origin').length ?? 0;
+
+  // Показан ли сейчас сохранённый кадр: от этого зависит, каким запросом
+  // доказывать оригинальность — по сохранённому фото или по новому кадру.
+  const showingAcceptedPhoto = done && Boolean(acceptedPhoto) && !improving;
+
+  // Провал именно из-за подозрения в оригинальности: такой кадр не сохранён,
+  // поэтому доказать его можно только вместе с повторной проверкой.
+  const failedOrigin =
+    !showingAcceptedPhoto &&
+    verdict?.verdict === 'fail' &&
+    (verdict.deductions ?? []).some((item) => item.kind === 'origin');
 
   return (
     <motion.div
@@ -643,7 +740,7 @@ export function TaskDetailsSheet({
                           </div>
                         )}
                       </div>
-                    ) : (acceptedPhoto.deductions?.length ?? 0) > 0 ? (
+                    ) : appealableCount > 0 ? (
                       appealOpen ? (
                         <div className="appeal-form">
                           <label
@@ -835,6 +932,81 @@ export function TaskDetailsSheet({
                         deductions={verdict.deductions}
                         taskId={task.id}
                       />
+                      {failedOrigin && (
+                        <div className="proof-note" style={{ marginTop: 10 }}>
+                          <p className="proof-note__title">
+                            ИИ сомневается, что фото сделано тобой
+                          </p>
+                          <p className="proof-note__text">
+                            Кадр не сохранён, поэтому доказать его можно сразу здесь:
+                            сними тот же объект с другого ракурса — и фото перепроверят.
+                          </p>
+                          {task.allowCollage || task.allowScreenshot ? (
+                            <p className="proof-note__text">
+                              Второй ракурс здесь не подходит: кадр собран в редакторе или
+                              это скриншот. Попробуй другой кадр.
+                            </p>
+                          ) : proofOpen ? (
+                            <div className="proof-form">
+                              <input
+                                ref={proofInputRef}
+                                className="proof-input"
+                                type="file"
+                                accept="image/*"
+                                onChange={(event) =>
+                                  pickProofFile(event.target.files?.[0] ?? null)
+                                }
+                                aria-label="Фото с другого ракурса"
+                              />
+                              {proofPreview ? (
+                                <img
+                                  className="proof-form__preview"
+                                  src={proofPreview}
+                                  alt="Кадр-доказательство"
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="btn btn--ghost btn--sm"
+                                  onClick={() => proofInputRef.current?.click()}
+                                >
+                                  Выбрать кадр-доказательство
+                                </button>
+                              )}
+                              <div className="proof-form__actions">
+                                <button
+                                  type="button"
+                                  className="btn btn--ghost btn--sm"
+                                  onClick={cancelProof}
+                                  disabled={proofBusy}
+                                >
+                                  Отмена
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn--sm"
+                                  onClick={() => void submitProof()}
+                                  disabled={!proofFile || proofBusy}
+                                >
+                                  {proofBusy ? 'Сравниваем…' : 'Отправить'}
+                                </button>
+                              </div>
+                              <p className="proof-form__hint">
+                                Подойдёт тот же объект с другой точки: шаг в сторону,
+                                другой фон или жест в кадре. Копия, кроп или наложение
+                                не подойдут.
+                              </p>
+                              {proofError && (
+                                <p className="proof-form__error">{proofError}</p>
+                              )}
+                            </div>
+                          ) : (
+                            <button type="button" className="btn btn--sm" onClick={openProof}>
+                              📷 Доказать, что фото моё
+                            </button>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}

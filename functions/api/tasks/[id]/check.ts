@@ -2,11 +2,13 @@ import { computeStatuses } from '../../../../shared/progress';
 import { TASK_BY_ID } from '../../../../shared/tasks';
 import type { PhotoMeta } from '../../../../shared/types';
 import { evaluatePhoto, parseStoredDeductions } from '../../_ai';
+import { saveApprovedPhoto } from '../../_store';
 import {
   fingerprintDistance,
   isFingerprint,
   isScreenShape,
   readImageSize,
+  sanitizePhotoMeta,
 } from '../../_image';
 import {
   authenticate,
@@ -31,23 +33,6 @@ interface CheckBody {
 /** Расстояние Хэмминга, при котором кадры считаются одним и тем же снимком. */
 const DUPLICATE_DISTANCE = 6;
 
-/** Клиент присылает только флаги и короткие строки — не доверяем форме. */
-function sanitizeMeta(raw: unknown): PhotoMeta | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const value = raw as Record<string, unknown>;
-  const flag = (input: unknown) => (typeof input === 'boolean' ? input : undefined);
-  const text = (input: unknown) =>
-    typeof input === 'string' ? input.trim().slice(0, 40) : undefined;
-
-  const meta: PhotoMeta = {
-    camera: flag(value.camera),
-    model: text(value.model),
-    software: text(value.software),
-    takenAt: flag(value.takenAt),
-    gps: flag(value.gps),
-  };
-  return Object.values(meta).some((item) => item !== undefined) ? meta : null;
-}
 
 export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Response> => {
   const auth = await authenticate(request, env);
@@ -173,7 +158,13 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
       }
     }
 
-    const verdict = await evaluatePhoto(env, task, match[0], previous, sanitizeMeta(body?.meta));
+    const verdict = await evaluatePhoto(
+      env,
+      task,
+      match[0],
+      previous,
+      sanitizePhotoMeta(body?.meta),
+    );
     const passed = verdict.verdict === 'pass' && verdict.score >= 70;
 
     if (!passed) {
@@ -208,45 +199,17 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
       });
     }
 
-    const photoId = crypto.randomUUID();
-    const statements = [
-      env.DB.prepare(
-        `INSERT INTO photos
-           (id, telegram_id, task_id, mime, image, score, verdict, reason, confidence, deductions, fingerprint)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(
-        photoId,
-        auth.user.id,
-        task.id,
-        match[1],
-        base64,
-        verdict.score,
-        verdict.verdict,
-        verdict.reason,
-        verdict.confidence,
-        JSON.stringify(verdict.deductions ?? []),
-        fingerprint,
-      ),
-    ];
-
-    if (alreadyCompleted) {
-      statements.push(
-        env.DB.prepare(
-          'UPDATE completions SET photo_id = ? WHERE telegram_id = ? AND task_id = ?',
-        ).bind(photoId, auth.user.id, task.id),
-      );
-    } else {
-      statements.push(
-        env.DB.prepare(
-          `INSERT OR IGNORE INTO completions
-             (telegram_id, task_id, points, manual, photo_id)
-           VALUES (?, ?, ?, 0, ?)`,
-        ).bind(auth.user.id, task.id, task.points, photoId),
-      );
-    }
-
+    let photoId: string;
     try {
-      await env.DB.batch(statements);
+      photoId = await saveApprovedPhoto(env, {
+        telegramId: auth.user.id,
+        task,
+        mime: match[1],
+        base64,
+        fingerprint,
+        verdict,
+        alreadyCompleted,
+      });
     } catch {
       // Чаще всего это неприменённая миграция с новыми колонками.
       return json({ error: 'db_unavailable' }, 500);

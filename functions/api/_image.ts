@@ -1,3 +1,5 @@
+import type { PhotoMeta } from '../../shared/types';
+
 /**
  * Дешёвая экспертиза кадра без декодирования картинки целиком: размеры из
  * заголовка файла, форма кадра и расстояние Хэмминга между отпечатками.
@@ -99,4 +101,22 @@ export function fingerprintDistance(left: string, right: string): number {
 
 export function isFingerprint(value: unknown): value is string {
   return typeof value === 'string' && /^[0-9a-f]{16}$/i.test(value.trim());
+}
+
+/** Клиент присылает только флаги и короткие строки — не доверяем форме. */
+export function sanitizePhotoMeta(raw: unknown): PhotoMeta | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as Record<string, unknown>;
+  const flag = (input: unknown) => (typeof input === 'boolean' ? input : undefined);
+  const text = (input: unknown) =>
+    typeof input === 'string' ? input.trim().slice(0, 40) : undefined;
+
+  const meta: PhotoMeta = {
+    camera: flag(value.camera),
+    model: text(value.model),
+    software: text(value.software),
+    takenAt: flag(value.takenAt),
+    gps: flag(value.gps),
+  };
+  return Object.values(meta).some((item) => item !== undefined) ? meta : null;
 }

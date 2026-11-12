@@ -1,4 +1,5 @@
-import { parseStoredDeductions } from '../../_ai';
+import { TASK_BY_ID } from '../../../../shared/tasks';
+import { humanizeIds, parseStoredDeductions } from '../../_ai';
 import { authenticate, json, type Ctx } from '../../_shared';
 
 interface PhotoRow {
@@ -55,20 +56,25 @@ export const onRequestGet = async ({ request, env, params }: Ctx): Promise<Respo
     const row = await loadPhotoRow(env, auth.user.id, params.id);
     if (!row) return json({ error: 'photo_not_found' }, 404);
 
+    // Тексты, сохранённые до правки, могли содержать служебные id рубрики.
+    const task = TASK_BY_ID.get(params.id);
+    const clean = (text: string | null) =>
+      text && task ? humanizeIds(text, task) : text;
+
     return json({
       image: `data:${row.mime};base64,${row.image}`,
       score: row.score,
       verdict: row.verdict,
-      reason: row.reason,
+      reason: clean(row.reason),
       deductions: parseStoredDeductions(row.deductions),
       confidence: row.confidence,
       appealedAt: row.appealed_at,
       appealScoreBefore: row.appeal_prev_score,
       appealText: row.appeal_text,
       appealDeductions: parseStoredDeductions(row.appeal_prev_deductions),
-      appealReason: row.appeal_reason,
+      appealReason: clean(row.appeal_reason),
       proofAt: row.proof_at ?? null,
-      proofReason: row.proof_reason ?? null,
+      proofReason: clean(row.proof_reason ?? null),
       proofScoreBefore: row.proof_prev_score ?? null,
       createdAt: row.created_at,
     });
