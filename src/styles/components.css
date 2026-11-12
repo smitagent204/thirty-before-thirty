@@ -507,8 +507,16 @@
 
 .verdict-details__item {
   display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.verdict-details__row {
+  display: flex;
   align-items: baseline;
   gap: 8px;
+  min-width: 0;
   font-size: 12.5px;
   line-height: 1.35;
 }
@@ -522,6 +530,54 @@
 
 .verdict-details__label {
   color: var(--c-text-muted);
+}
+
+.verdict-details__label--button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: underline dotted rgba(255, 255, 255, 0.25);
+  text-underline-offset: 2px;
+}
+
+.verdict-details__more {
+  display: block;
+  margin-top: 1px;
+  color: var(--c-text-muted);
+  font-size: 10px;
+  line-height: 1.3;
+  opacity: 0.65;
+  text-decoration: none;
+}
+
+.verdict-details__why {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 2px 0 4px 34px;
+  padding: 8px 10px;
+  border-left: 2px solid rgba(255, 215, 94, 0.22);
+  border-radius: 0 8px 8px 0;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--c-text-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.verdict-details__why-row {
+  margin: 0;
+}
+
+.verdict-details__why-title {
+  display: block;
+  margin-bottom: 1px;
+  color: var(--c-gold-300);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .verdict-details__dismiss {
@@ -557,7 +613,7 @@
   margin-top: 8px;
 }
 
-.verdict-details--compact .verdict-details__item {
+.verdict-details--compact .verdict-details__row {
   font-size: 12px;
 }
 
@@ -710,6 +766,7 @@
   color: #cdebd1;
   font-size: 12.5px;
   line-height: 1.5;
+  white-space: pre-line;
 }
 
 .appeal-details__quote {

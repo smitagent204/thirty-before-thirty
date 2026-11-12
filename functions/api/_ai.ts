@@ -320,7 +320,9 @@ function parseAppealResponse(text: string): {
 
   try {
     const raw = JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>;
-    if (typeof raw.reason === 'string') reason = raw.reason.slice(0, 300).trim() || null;
+    // Ответ на апелляцию развёрнутый: модель объясняет позицию по каждому
+    // замечанию, поэтому лимит выше, чем у короткой похвалы.
+    if (typeof raw.reason === 'string') reason = raw.reason.slice(0, 900).trim() || null;
     if (!Array.isArray(raw.checks)) return { answers, reason };
 
     for (const entry of raw.checks) {

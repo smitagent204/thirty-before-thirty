@@ -740,6 +740,7 @@ export function DevPanel({ onClose }: DevPanelProps) {
                       <VerdictDetails
                         reason={inspectState.photo.reason}
                         deductions={inspectState.photo.deductions}
+                        taskId={inspectTask.id}
                         compact
                         onDismiss={(item) => void dismissDeduction(inspectTask.id, item)}
                       />

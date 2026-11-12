@@ -390,6 +390,7 @@ export function TaskDetailsSheet({
                     <VerdictDetails
                       reason={acceptedPhoto.reason}
                       deductions={acceptedPhoto.deductions}
+                      taskId={task.id}
                       compact
                     />
 
@@ -420,6 +421,7 @@ export function TaskDetailsSheet({
                                 </p>
                                 <VerdictDetails
                                   deductions={acceptedPhoto.appealDeductions}
+                                  taskId={task.id}
                                   compact
                                 />
                               </>
@@ -487,7 +489,8 @@ export function TaskDetailsSheet({
                           </div>
                           <p className="appeal-form__hint">
                             Апелляция для одного фото — один раз. Оценка может только
-                            вырасти.
+                            вырасти. У каждого минуса выше можно раскрыть требование — опирайся
+                            на него в пояснении.
                           </p>
                           {appealError && (
                             <p className="appeal-form__error">{appealError}</p>
@@ -523,6 +526,7 @@ export function TaskDetailsSheet({
                     <VerdictDetails
                       reason={improveResult.reason}
                       deductions={improveResult.deductions}
+                      taskId={task.id}
                       compact
                     />
                   </div>
@@ -627,6 +631,7 @@ export function TaskDetailsSheet({
                       <VerdictDetails
                         reason={verdict.reason}
                         deductions={verdict.deductions}
+                        taskId={task.id}
                       />
                     </div>
                   </div>
