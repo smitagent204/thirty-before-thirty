@@ -1,5 +1,6 @@
 import {
   buildAppealPrompt,
+  buildAppealRecheckPrompt,
   buildVerificationPrompt,
   buildVerdictPrompt,
   type AppealClaim,
@@ -354,6 +355,37 @@ function parseAppealResponse(text: string): {
   return { answers, reason };
 }
 
+type AppealRecheckState = 'ok' | 'partial' | 'no';
+
+/** Узкий ответ перепроверки: подтверждает ли кадр довод человека. */
+function parseAppealRecheck(text: string): Map<string, AppealRecheckState> {
+  const answers = new Map<string, AppealRecheckState>();
+  const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end <= start) return answers;
+
+  try {
+    const raw = JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>;
+    if (!Array.isArray(raw.checks)) return answers;
+
+    for (const entry of raw.checks) {
+      if (!entry || typeof entry !== 'object') continue;
+      const value = entry as Record<string, unknown>;
+      const id = typeof value.id === 'string' ? value.id.trim() : '';
+      const state = typeof value.state === 'string' ? value.state.toLowerCase() : '';
+      if (!id) continue;
+      if (state === 'ok' || state === 'yes' || state === 'visible') answers.set(id, 'ok');
+      else if (state === 'partial' || state === 'частично') answers.set(id, 'partial');
+      else if (state === 'no' || state === 'missing' || state === 'нет') answers.set(id, 'no');
+    }
+  } catch {
+    // Битый ответ — останется минимальный возврат.
+  }
+
+  return answers;
+}
+
 /**
  * Второй проход по тем же минусам. Если проверяющий видит предмет, минус
  * снимается: лучше недосчитать, чем незаслуженно провалить хорошее фото.
@@ -433,9 +465,8 @@ export async function appealVerdict(
     await runVision(env, buildAppealPrompt(task, claims, note), image),
   );
 
-  let modelRelief = 0;
-  const reduced: AiDeduction[] = [];
-  current.forEach((item, index) => {
+  // Сколько вернул первый проход по каждому пункту.
+  const reliefs = current.map((item, index) => {
     const answer = answers.get(claims[index].id);
     let relief = 0;
     if (answer?.reduce !== undefined) {
@@ -445,9 +476,46 @@ export async function appealVerdict(
     } else if (answer?.state === 'partial') {
       relief = Math.max(1, Math.round(item.percent / 2));
     }
-
     // Модель не может вернуть больше, чем было списано, или уйти в минус.
-    relief = Math.max(0, Math.min(item.percent, relief));
+    return Math.max(0, Math.min(item.percent, relief));
+  });
+
+  // Первый проход отказал хотя бы по одному пункту — перечитываем только эти
+  // пункты узким вопросом: подтверждает ли кадр довод человека. Иначе честная
+  // апелляция упирается в гарантированный 1%.
+  const refused = current
+    .map((item, index) => ({ item, index }))
+    .filter(({ index }) => reliefs[index] < APPEAL_MIN_PER_ITEM);
+  if (refused.length > 0) {
+    try {
+      const rechecked = parseAppealRecheck(
+        await runVision(
+          env,
+          buildAppealRecheckPrompt(
+            task,
+            refused.map(({ index }) => claims[index]),
+            note,
+          ),
+          image,
+        ),
+      );
+      for (const { item, index } of refused) {
+        const state = rechecked.get(claims[index].id);
+        if (state === 'ok') {
+          reliefs[index] = item.percent;
+        } else if (state === 'partial') {
+          reliefs[index] = Math.max(1, Math.round(item.percent / 2));
+        }
+      }
+    } catch {
+      // Перепроверка не удалась — оставляем результат первого прохода.
+    }
+  }
+
+  let modelRelief = 0;
+  const reduced: AiDeduction[] = [];
+  current.forEach((item, index) => {
+    let relief = reliefs[index];
     modelRelief += relief;
 
     // Даже если ИИ не согласен, каждый оставшийся минус уменьшается на 1%:
