@@ -8,6 +8,7 @@ import {
   ApiError,
   hasTelegramAuth,
   type RecheckResult,
+  type WifePhotoInfo,
   type WifeTaskState,
 } from '../api/client';
 import { readFileAsDataUrl } from '../lib/photo';
@@ -44,8 +45,14 @@ export function DevPanel({ onClose }: DevPanelProps) {
   const [wifeCompleted, setWifeCompleted] = useState<string[]>([]);
   const [wifeManual, setWifeManual] = useState<string[]>([]);
   const [wifeConfigured, setWifeConfigured] = useState<boolean | null>(null);
+  const [wifeError, setWifeError] = useState<string | null>(null);
+  const [wifePhotosError, setWifePhotosError] = useState(false);
   const [rechecking, setRechecking] = useState(false);
   const [recheckRows, setRecheckRows] = useState<RecheckRow[]>([]);
+  const [recheckTotal, setRecheckTotal] = useState(0);
+  const [recheckOpen, setRecheckOpen] = useState(false);
+  const [recheckSelected, setRecheckSelected] = useState<string[]>([]);
+  const [wifePhotos, setWifePhotos] = useState<Record<string, WifePhotoInfo>>({});
   const [inspectTask, setInspectTask] = useState<Task | null>(null);
   const [inspectState, setInspectState] = useState<WifeTaskState | null>(null);
   const [inspectError, setInspectError] = useState<string | null>(null);
@@ -62,23 +69,27 @@ export function DevPanel({ onClose }: DevPanelProps) {
     onClose();
   };
 
-  useEffect(() => {
+  const loadWife = async () => {
     if (!serverMode) return;
-    let cancelled = false;
-    api
-      .wife()
-      .then((state) => {
-        if (cancelled) return;
-        setWifeCompleted(state.completed);
-        setWifeManual(state.manualCompleted);
-        setWifeConfigured(state.configured);
-      })
-      .catch(() => {
-        if (!cancelled) setWifeConfigured(false);
-      });
-    return () => {
-      cancelled = true;
-    };
+    try {
+      const state = await api.wife();
+      setWifeError(null);
+      setWifeCompleted(state.completed ?? []);
+      setWifeManual(state.manualCompleted ?? []);
+      setWifeConfigured(state.configured);
+      setWifePhotosError(Boolean(state.photosError));
+      setWifePhotos(
+        Object.fromEntries((state.photos ?? []).map((photo) => [photo.taskId, photo])),
+      );
+    } catch (error) {
+      setWifeError(error instanceof ApiError ? `${error.status} ${error.code}` : 'network');
+      setWifeConfigured(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadWife();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [serverMode]);
 
   const runServer = async (action: string, body?: unknown): Promise<boolean> => {
@@ -190,24 +201,63 @@ export function DevPanel({ onClose }: DevPanelProps) {
     setInspectLoading(true);
     try {
       setInspectState(await api.wifeTask(task.id));
-    } catch {
-      setInspectError('Не удалось загрузить данные задания.');
+    } catch (error) {
+      setInspectError(inspectErrorText(error));
     } finally {
       setInspectLoading(false);
     }
   };
 
   const recheckIds = wifeCompleted.filter((taskId) => !wifeManual.includes(taskId));
+  // Если список оценок не пришёл, не прячем задания: переоценка опирается на
+  // серверную запись, а не на этот список.
+  const recheckableIds = wifePhotosError
+    ? recheckIds
+    : recheckIds.filter((taskId) => Boolean(wifePhotos[taskId]));
 
-  const recheckWife = async () => {
-    if (!serverMode || rechecking || recheckIds.length === 0) return;
+  /**
+   * Если Workers AI отвечает `ai_unavailable`, повторяем запрос: без этого
+   * у задания не появляется результат вовсе. Три попытки с паузами.
+   */
+  const recheckOne = async (taskId: string): Promise<RecheckResult> => {
+    const delays = [900, 1800];
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await api.recheckWifeTask(taskId);
+      } catch (error) {
+        const retryable = error instanceof ApiError && error.code === 'ai_unavailable';
+        if (!retryable || attempt >= delays.length) throw error;
+        await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+      }
+    }
+  };
+
+  const recheckWife = async (ids: string[]) => {
+    if (!serverMode || rechecking || ids.length === 0) return;
+    setRecheckOpen(false);
     setRechecking(true);
+    setRecheckTotal(ids.length);
     setRecheckRows([]);
 
     const rows: RecheckRow[] = [];
-    for (const taskId of recheckIds) {
+    for (const taskId of ids) {
       try {
-        rows.push(await api.recheckWifeTask(taskId));
+        const result = await recheckOne(taskId);
+        rows.push(result);
+        // Держим список в модалке актуальным, если её откроют повторно.
+        setWifePhotos((prev) => {
+          const current = prev[taskId];
+          if (!current) return prev;
+          return {
+            ...prev,
+            [taskId]: {
+              ...current,
+              score: result.kept ? result.oldScore : result.newScore,
+              verdict: result.verdict,
+              appealedAt: result.appealReset ? null : current.appealedAt,
+            },
+          };
+        });
       } catch (error) {
         rows.push({
           taskId,
@@ -219,6 +269,18 @@ export function DevPanel({ onClose }: DevPanelProps) {
     }
 
     setRechecking(false);
+  };
+
+  const openRecheck = () => {
+    if (rechecking || recheckableIds.length === 0) return;
+    setRecheckSelected(recheckableIds);
+    setRecheckOpen(true);
+  };
+
+  const toggleRecheck = (taskId: string) => {
+    setRecheckSelected((prev) =>
+      prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId],
+    );
   };
 
   const dismissDeduction = async (taskId: string, item: AiDeduction) => {
@@ -381,26 +443,46 @@ export function DevPanel({ onClose }: DevPanelProps) {
           </p>
 
           <p className="dev-note">
-            {wifeConfigured === false
-              ? 'USER_TELEGRAM_ID не задан — прогресс второго пользователя недоступен.'
-              : 'Розовый кружок — задание выполнено женой.'}
+            {wifeConfigured === false ? (
+              <>
+                Не удалось получить прогресс жены
+                {wifeError ? ` (${wifeError})` : ''}. Проверь, что в настройках Pages задан
+                USER_TELEGRAM_ID и сервер задеплоен вместе с функциями.{' '}
+                <button
+                  type="button"
+                  className="dev-inline-link"
+                  onClick={() => void loadWife()}
+                >
+                  Повторить
+                </button>
+              </>
+            ) : (
+              'Розовый кружок — задание выполнено женой.'
+            )}
           </p>
+
+          {wifeConfigured === true && wifePhotosError && (
+            <p className="dev-note">
+              Оценки фото прочитать не удалось — в списке переоценки будут названия без баллов.
+            </p>
+          )}
 
           {wifeConfigured === true && recheckIds.length > 0 && (
             <div style={{ marginTop: 10 }}>
               <button
                 type="button"
                 className="btn btn--ghost btn--sm"
-                disabled={rechecking}
-                onClick={() => void recheckWife()}
+                disabled={rechecking || recheckableIds.length === 0}
+                onClick={openRecheck}
               >
                 {rechecking
-                  ? 'Переоцениваем…'
-                  : `Переоценить фото жены (${recheckIds.length})`}
+                  ? `Переоцениваем… ${recheckRows.length} из ${recheckTotal}`
+                  : `Переоценить фото жены (${recheckableIds.length})`}
               </button>
               <p className="dev-note">
                 Запусти один раз после деплоя: сохранённые фото пересчитаются по новым правилам,
-                ниже появится отчёт с минусами.
+                ниже появится отчёт с минусами. Перед запуском можно выбрать задания. Если ИИ
+                не отвечает, запрос повторяется — до трёх попыток.
               </p>
 
               {recheckRows.length > 0 && (
@@ -411,7 +493,9 @@ export function DevPanel({ onClose }: DevPanelProps) {
                         <div className="dev-row" key={row.taskId}>
                           <div className="dev-row__main">
                             {row.title}
-                            <span className="dev-row__sub">Ошибка: {row.error}</span>
+                            <span className="dev-row__sub">
+                              Ошибка: {recheckErrorText(row.error)}
+                            </span>
                           </div>
                         </div>
                       );
@@ -503,6 +587,97 @@ export function DevPanel({ onClose }: DevPanelProps) {
           </button>
         </div>
       </div>
+
+      {recheckOpen && (
+        <div className="sheet-layer sheet-layer--nested">
+          <div className="scrim" onClick={() => setRecheckOpen(false)} />
+          <div className="sheet sheet--compact">
+            <div className="sheet__handle" />
+            <div className="sheet__head">
+              <div className="sheet__head-text">
+                <div className="sheet__eyebrow">
+                  <span
+                    className="rarity"
+                    style={
+                      { '--rarity': 'var(--c-info)', '--rarity-light': 'var(--c-info)' } as CSSProperties
+                    }
+                  >
+                    переоценка
+                  </span>
+                </div>
+                <h3 className="sheet__title">Какие фото переоценить?</h3>
+              </div>
+              <button
+                type="button"
+                className="sheet__close"
+                onClick={() => setRecheckOpen(false)}
+                aria-label="Закрыть"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="sheet__body">
+              <div className="dev-list">
+                {recheckIds.map((taskId) => {
+                  const task = TASK_BY_ID.get(taskId);
+                  const photo = wifePhotos[taskId];
+                  const unknown = !photo && wifePhotosError;
+                  const disabled = !photo && !unknown;
+                  return (
+                    <label
+                      key={taskId}
+                      className={`dev-check${disabled ? ' dev-check--disabled' : ''}`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={recheckSelected.includes(taskId)}
+                        disabled={disabled}
+                        onChange={() => toggleRecheck(taskId)}
+                      />
+                      <span>
+                        {task?.title ?? taskId}
+                        <span className="dev-check__hint">
+                          {task ? `${task.id} · +${task.points}` : taskId}
+                          {photo
+                            ? ` · сейчас ${photo.score}%${
+                                photo.appealedAt ? ' · апелляция подана' : ''
+                              }`
+                            : unknown
+                              ? ' · оценка недоступна, но переоценить можно'
+                              : ' · фото не сохранено — переоценивать нечего'}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="dev-note">
+                Отмеченные задания пересчитаются по актуальным правилам, остальные не тронем.
+                Если ИИ не отвечает, запрос повторится сам — до трёх попыток.
+              </p>
+            </div>
+
+            <div className="sheet__footer" style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                className="btn btn--ghost btn--sm"
+                onClick={() => setRecheckOpen(false)}
+              >
+                Отмена
+              </button>
+              <button
+                type="button"
+                className="btn btn--sm"
+                disabled={recheckSelected.length === 0}
+                onClick={() => void recheckWife(recheckSelected)}
+              >
+                {`Переоценить выбранные (${recheckSelected.length})`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {inspectTask && (
         <div className="sheet-layer sheet-layer--nested">
@@ -604,6 +779,33 @@ export function DevPanel({ onClose }: DevPanelProps) {
       )}
     </div>
   );
+}
+
+function inspectErrorText(error: unknown): string {
+  if (!(error instanceof ApiError)) return 'Не удалось загрузить данные задания (сеть).';
+  switch (error.code) {
+    case 'wife_not_configured':
+      return 'На сервере не задан USER_TELEGRAM_ID — данные жены недоступны.';
+    case 'db_unavailable':
+      return 'База данных не ответила. Попробуй ещё раз чуть позже.';
+    case 'unauthorized':
+    case 'init_data_expired':
+      return 'Сессия Telegram истекла — закрой и снова открой приложение.';
+    case 'forbidden':
+      return 'Сервер не считает тебя владельцем — проверь OWNER_TELEGRAM_ID.';
+    case 'server_not_configured':
+      return 'На сервере не задан TELEGRAM_BOT_TOKEN.';
+    default:
+      return `Не удалось загрузить данные задания (${error.status} ${error.code}).`;
+  }
+}
+
+function recheckErrorText(code: string): string {
+  if (code === 'ai_unavailable') return 'ИИ не ответил, три попытки не удались';
+  if (code === 'photo_not_found') return 'фото не сохранено';
+  if (code === 'task_not_completed') return 'задание больше не отмечено выполненным';
+  if (code === 'wife_not_configured') return 'не задан USER_TELEGRAM_ID';
+  return code;
 }
 
 function formatDateTime(value: string): string {

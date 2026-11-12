@@ -94,11 +94,56 @@ async function wifeState(ctx: Ctx): Promise<Response> {
       manualCompleted: [],
       chestOpened: false,
       configured: false,
+      photos: [],
     });
   }
 
   const state = await loadState(ctx.env, telegramId);
-  return json({ ...state, configured: true });
+
+  // Оценки фото — вспомогательные данные для списка переоценки. Если этот
+  // запрос не пройдёт, прогресс жены всё равно должен отдаваться.
+  let photos: Array<{
+    taskId: string;
+    score: number;
+    verdict: string;
+    appealedAt: string | null;
+    createdAt: string;
+  }> = [];
+  let photosError: string | null = null;
+
+  try {
+    const rows = await ctx.env.DB.prepare(
+      `SELECT p.task_id, p.score, p.verdict, p.appealed_at, p.created_at
+       FROM photos AS p
+       WHERE p.telegram_id = ?
+         AND p.rowid = (
+           SELECT q.rowid FROM photos AS q
+           WHERE q.telegram_id = p.telegram_id AND q.task_id = p.task_id
+           ORDER BY q.created_at DESC, q.rowid DESC
+           LIMIT 1
+         )`,
+    )
+      .bind(telegramId)
+      .all<{
+        task_id: string;
+        score: number;
+        verdict: string;
+        appealed_at: string | null;
+        created_at: string;
+      }>();
+
+    photos = (rows.results ?? []).map((row) => ({
+      taskId: row.task_id,
+      score: row.score,
+      verdict: row.verdict,
+      appealedAt: row.appealed_at,
+      createdAt: row.created_at,
+    }));
+  } catch {
+    photosError = 'photos_unavailable';
+  }
+
+  return json({ ...state, configured: true, photos, photosError });
 }
 
 /** Детали задания жены: дата выполнения, фото и комментарий ИИ. */

@@ -1188,6 +1188,25 @@
   cursor: pointer;
 }
 
+.dev-inline-link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--c-gold-400);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.dev-check--disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.dev-check--disabled input {
+  cursor: default;
+}
+
 .dev-check__hint {
   display: block;
   margin-top: 3px;

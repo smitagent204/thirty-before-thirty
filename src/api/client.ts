@@ -59,11 +59,23 @@ export interface PrizeResult {
   image: string;
 }
 
+export interface WifePhotoInfo {
+  taskId: string;
+  score: number;
+  verdict: string;
+  appealedAt: string | null;
+  createdAt: string;
+}
+
 export interface WifeState {
   completed: string[];
   manualCompleted: string[];
   chestOpened: boolean;
   configured: boolean;
+  /** Последнее сохранённое фото по каждому заданию — для списка переоценки. */
+  photos?: WifePhotoInfo[];
+  /** Оценки фото прочитать не удалось; прогресс при этом доступен. */
+  photosError?: string | null;
 }
 
 export interface PhotoResult {

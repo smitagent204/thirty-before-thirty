@@ -9,4 +9,5 @@ export const onRequestGet = async ({ env }: Ctx): Promise<Response> =>
     telegram: Boolean(env.TELEGRAM_BOT_TOKEN),
     pin: Boolean(env.MANUAL_PIN),
     owner: Boolean(env.OWNER_TELEGRAM_ID),
+    wifeUser: Boolean(env.USER_TELEGRAM_ID),
   });
