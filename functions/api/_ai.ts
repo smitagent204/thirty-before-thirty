@@ -1,13 +1,20 @@
 import {
   buildAppealPrompt,
   buildAppealRecheckPrompt,
+  buildOriginPrompt,
   buildProofPrompt,
   buildVerificationPrompt,
   buildVerdictPrompt,
   type AppealClaim,
   type PreviousAttempt,
 } from '../../shared/aiPrompt';
-import type { AiDeduction, AiVerdict, Task, TaskRequirement } from '../../shared/types';
+import type {
+  AiDeduction,
+  AiVerdict,
+  PhotoMeta,
+  Task,
+  TaskRequirement,
+} from '../../shared/types';
 import type { Env } from './_shared';
 
 const PASS_SCORE = 70;
@@ -43,6 +50,8 @@ interface RawVerdict {
   allVisible: boolean;
   /** Происхождение кадра: скачанный или стоковый не должен приносить баллы. */
   source: RawSource;
+  /** Уверенность именно в оценке происхождения. */
+  sourceConfidence: number;
   sourceNote: string | null;
   deductions: RawDeduction[];
 }
@@ -123,19 +132,26 @@ export function parseVerdict(text: string): RawVerdict | null {
         : rawSource === 'suspicious' || rawSource === 'подозрительно'
           ? 'suspicious'
           : 'own';
-    const sourceNote =
-      typeof raw.source_note === 'string' && raw.source_note.trim()
-        ? raw.source_note.trim().slice(0, 160)
-        : null;
+    // Пояснение показываем человеку, поэтому английский текст заменяем:
+    // модель иногда отвечает «watermark of ...» вместо русского.
+    const fallbackReason = invalid
+      ? 'Кадр не относится к заданию: на нём нет деталей задания.'
+      : 'Хороший кадр — спасибо, что поделился!';
+    const finalReason = reason && /[а-яё]/i.test(reason) ? reason : fallbackReason;
+
+    const rawNote =
+      typeof raw.source_note === 'string' ? raw.source_note.trim().slice(0, 160) : '';
+    const sourceNote = rawNote && /[а-яё]/i.test(rawNote) ? rawNote : null;
 
     return {
       // Для invalid пустая похвала не ошибка: покажем понятное объяснение.
-      reason: reason || 'Фото не относится к заданию.',
+      reason: finalReason,
       confidence: Math.max(0, Math.min(1, confidence)),
       invalid,
       // Старые ответы без all_visible считаем «всё видно», если нет вычетов.
       allVisible: raw.all_visible !== false,
       source,
+      sourceConfidence: Math.max(0, Math.min(1, confidence)),
       sourceNote,
       deductions: parseRawDeductions(raw.deductions),
     };
@@ -240,7 +256,7 @@ function buildVerdict(
   // Скачанный кадр не засчитывается, даже если всё формально «видно»:
   // смысл заданий в том, чтобы человек снял это сам. Если модель сама не
   // уверена, это не «downloaded», а «suspicious» — не обнуляем честное фото.
-  const downloaded = raw.source === 'downloaded' && raw.confidence >= 0.6;
+  const downloaded = raw.source === 'downloaded' && raw.sourceConfidence >= 0.6;
   if (downloaded) {
     return {
       score: INVALID_SCORE,
@@ -738,12 +754,92 @@ export async function proveOriginality(
   return outcome;
 }
 
+interface OriginCheck {
+  source: RawSource;
+  confidence: number;
+  note: string | null;
+}
+
+function parseOrigin(text: string): OriginCheck | null {
+  const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+
+  try {
+    const raw = JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>;
+    const originRaw = typeof raw.origin === 'string' ? raw.origin.toLowerCase() : '';
+    const source: RawSource | null =
+      originRaw === 'downloaded'
+        ? 'downloaded'
+        : originRaw === 'suspicious'
+          ? 'suspicious'
+          : originRaw === 'own'
+            ? 'own'
+            : null;
+    if (!source) return null;
+
+    const confidence = Number(raw.confidence);
+    if (!Number.isFinite(confidence)) return null;
+
+    const rawNote = typeof raw.note === 'string' ? raw.note.trim().slice(0, 160) : '';
+    // В интерфейс попадает только русский текст.
+    const note = rawNote && /[а-яё]/i.test(rawNote) ? rawNote : null;
+
+    return { source, confidence: Math.max(0, Math.min(1, confidence)), note };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Отдельный проход только про происхождение. Основной вердикт занят рубрикой и
+ * легко пропускает каталожный снимок, поэтому спрашиваем ещё раз узко.
+ * Сбой дополнительного прохода не должен ломать саму проверку.
+ */
+async function checkOrigin(
+  env: Env,
+  task: Task,
+  image: string,
+  meta?: PhotoMeta | null,
+): Promise<OriginCheck | null> {
+  try {
+    return parseOrigin(await runVision(env, buildOriginPrompt(task, meta), image));
+  } catch {
+    return null;
+  }
+}
+
+/** Оставляет более тяжёлое подозрение; при равенстве — более уверенное. */
+function applyOrigin(raw: RawVerdict, origin: OriginCheck): RawVerdict {
+  const rank = (source: RawSource) =>
+    source === 'downloaded' ? 2 : source === 'suspicious' ? 1 : 0;
+  const current = { source: raw.source, confidence: raw.sourceConfidence, note: raw.sourceNote };
+  const originWins =
+    rank(origin.source) > rank(current.source) ||
+    (rank(origin.source) === rank(current.source) && origin.confidence > current.confidence);
+  if (!originWins) return raw;
+
+  // Низкая уверенность в «downloaded» не должна обнулять честное фото:
+  // такой случай остаётся подозрением и лечится вторым ракурсом.
+  const source: RawSource =
+    origin.source === 'downloaded' && origin.confidence < 0.6 ? 'suspicious' : origin.source;
+
+  return {
+    ...raw,
+    source,
+    sourceConfidence: origin.confidence,
+    sourceNote: origin.note ?? raw.sourceNote,
+  };
+}
+
 /** Единая проверка фото для обычной загрузки, повторной попытки и переоценки. */
 export async function evaluatePhoto(
   env: Env,
   task: Task,
   image: string,
   previous?: PreviousAttempt | null,
+  meta?: PhotoMeta | null,
 ): Promise<AiVerdict> {
   const prompt = buildVerdictPrompt(task, previous);
   let raw = parseVerdict(await runVision(env, prompt, image));
@@ -784,6 +880,17 @@ export async function evaluatePhoto(
         // Похвалу оставляем из первого прохода: перепроверка говорит о минусах,
         // и её служебный текст не должен попадать в карточку вместо похвалы.
       };
+      verdict = buildVerdict(task, raw);
+    }
+  }
+
+  // Третий взгляд — только происхождение кадра. Основной вердикт занят рубрикой
+  // и пропускает каталожные снимки, поэтому для проходящих фото спрашиваем
+  // отдельно и узко. Явные провалы не проверяем: лишний вызов ничего не даст.
+  if (!raw.invalid && verdict.verdict === 'pass') {
+    const origin = await checkOrigin(env, task, image, meta);
+    if (origin) {
+      raw = applyOrigin(raw, origin);
       verdict = buildVerdict(task, raw);
     }
   }

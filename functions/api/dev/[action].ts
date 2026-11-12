@@ -233,7 +233,7 @@ async function recheckWifeTask(ctx: Ctx): Promise<Response> {
   if (!completion) return json({ error: 'task_not_completed' }, 404);
 
   const photo = await ctx.env.DB.prepare(
-    `SELECT id, mime, image, score, verdict, reason, deductions, appealed_at
+    `SELECT id, mime, image, score, verdict, reason, deductions, appealed_at, proof_at
      FROM photos
      WHERE telegram_id = ? AND task_id = ?
      ORDER BY created_at DESC, rowid DESC
@@ -249,6 +249,7 @@ async function recheckWifeTask(ctx: Ctx): Promise<Response> {
       reason: string;
       deductions: string;
       appealed_at: string | null;
+      proof_at: string | null;
     }>();
   if (!photo) return json({ error: 'photo_not_found' }, 404);
 
@@ -279,6 +280,9 @@ async function recheckWifeTask(ctx: Ctx): Promise<Response> {
     // Если фото уже оспаривалось, а переоценка сделала его хуже, старый
     // пересмотр больше не актуален: снимаем отметку — апелляцию можно подать заново.
     const appealReset = Boolean(photo.appealed_at) && verdict.score < photo.score;
+    // Свежая переоценка — новая ситуация: если сомнение в оригинальности
+    // появилось снова, второй ракурс можно доказать заново.
+    const proofReset = Boolean(photo.proof_at);
 
     await ctx.env.DB.prepare(
       `UPDATE photos
@@ -287,6 +291,7 @@ async function recheckWifeTask(ctx: Ctx): Promise<Response> {
          ? `, appealed_at = NULL, appeal_text = NULL, appeal_prev_score = NULL,
               appeal_prev_deductions = NULL, appeal_reason = NULL`
          : ''}
+       ${proofReset ? `, proof_at = NULL, proof_reason = NULL, proof_prev_score = NULL` : ''}
        WHERE id = ?`,
     )
       .bind(

@@ -192,6 +192,7 @@ export const LEVEL_3_4_TASKS: Task[] = [
     level: 3,
     order: 5,
     points: 5,
+    allowCollage: true,
     emoji: '🐈',
     title: 'Охота за котами, пышками и грифонами',
     description:
@@ -285,6 +286,7 @@ export const LEVEL_3_4_TASKS: Task[] = [
     level: 3,
     order: 7,
     points: 5,
+    allowCollage: true,
     emoji: '🏛️',
     title: 'Секретная парадная «Ромашка» и бранч у Пяти углов',
     description:

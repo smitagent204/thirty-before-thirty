@@ -61,6 +61,7 @@ export const LEVEL_1_2_TASKS: Task[] = [
     level: 1,
     order: 2,
     points: 1,
+    allowCollage: true,
     emoji: '📷',
     title: 'Арт-репортаж «Один вторник моих 29» в ЧБ',
     description:
@@ -160,6 +161,7 @@ export const LEVEL_1_2_TASKS: Task[] = [
     level: 1,
     order: 3,
     points: 1,
+    allowCollage: true,
     emoji: '👗',
     title: 'Домашний подиум «Гардероб вне декрета»',
     description:
@@ -215,6 +217,7 @@ export const LEVEL_1_2_TASKS: Task[] = [
     level: 2,
     order: 1,
     points: 2,
+    allowCollage: true,
     emoji: '🧋',
     title: '«Кофейное бинго» района Дыбенко — Кудрово',
     description:
@@ -362,6 +365,7 @@ export const LEVEL_1_2_TASKS: Task[] = [
     level: 2,
     order: 4,
     points: 2,
+    allowCollage: true,
     emoji: '🧭',
     title: 'Квест «Слепой поворот» по району',
     description:
@@ -451,6 +455,9 @@ export const LEVEL_1_2_TASKS: Task[] = [
     level: 2,
     order: 6,
     points: 2,
+    allowCollage: true,
+    formatHint:
+      'картинки внутри карты желаний — вырезки из журналов или распечатки из интернета, так и задумано; оценивай, что саму карту снял человек',
     emoji: '🌠',
     title: 'Карта желаний на год до 31',
     description:
@@ -681,6 +688,7 @@ export const LEVEL_1_2_TASKS: Task[] = [
     level: 2,
     order: 11,
     points: 2,
+    allowCollage: true,
     emoji: '🪟',
     title: 'Фотоохота «6 зимних окон»',
     description:

@@ -1,3 +1,6 @@
+import type { PhotoMeta } from '@shared/types';
+import { readPhotoMeta } from './exif';
+
 function loadImage(file: File): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -55,6 +58,8 @@ export interface CompressedPhoto {
   image: string;
   /** Отпечаток для поиска повторов; пустая строка, если посчитать не вышло. */
   fingerprint: string;
+  /** Метаданные исходного файла — подсказка проверке происхождения. */
+  meta: PhotoMeta | null;
 }
 
 /**
@@ -92,7 +97,15 @@ export async function compressPhoto(file: File): Promise<CompressedPhoto> {
     // Canvas недоступен — проверка на повтор просто не сработает.
   }
 
-  return { image: dataUrl, fingerprint };
+  // Читаем метаданные исходного файла: после canvas их уже не будет.
+  let meta: PhotoMeta | null = null;
+  try {
+    meta = await readPhotoMeta(file);
+  } catch {
+    meta = null;
+  }
+
+  return { image: dataUrl, fingerprint, meta };
 }
 
 /** Читает файл как data URL без пережатия — для QR-приза. */

@@ -1,4 +1,4 @@
-import type { AiDeduction } from '@shared/types';
+import type { AiDeduction, PhotoMeta } from '@shared/types';
 
 export interface ServerState {
   completed: string[];
@@ -194,7 +194,7 @@ export const api = {
   check: (
     taskId: string,
     image: string,
-    options: { forceFail?: boolean; fingerprint?: string } = {},
+    options: { forceFail?: boolean; fingerprint?: string; meta?: PhotoMeta | null } = {},
   ) =>
     request<CheckResult>(`/api/tasks/${encodeURIComponent(taskId)}/check`, {
       method: 'POST',
@@ -202,6 +202,7 @@ export const api = {
         image,
         forceFail: options.forceFail === true,
         fingerprint: options.fingerprint || undefined,
+        meta: options.meta ?? undefined,
       }),
     }),
 

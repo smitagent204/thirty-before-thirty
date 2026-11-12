@@ -1,5 +1,6 @@
 import { computeStatuses } from '../../../../shared/progress';
 import { TASK_BY_ID } from '../../../../shared/tasks';
+import type { PhotoMeta } from '../../../../shared/types';
 import { evaluatePhoto, parseStoredDeductions } from '../../_ai';
 import {
   fingerprintDistance,
@@ -23,10 +24,30 @@ interface CheckBody {
   forceFail?: boolean;
   /** dHash кадра, посчитанный в браузере до пережатия. */
   fingerprint?: string;
+  /** Метаданные исходного файла: камера, редактор, дата съёмки. */
+  meta?: PhotoMeta;
 }
 
 /** Расстояние Хэмминга, при котором кадры считаются одним и тем же снимком. */
 const DUPLICATE_DISTANCE = 6;
+
+/** Клиент присылает только флаги и короткие строки — не доверяем форме. */
+function sanitizeMeta(raw: unknown): PhotoMeta | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as Record<string, unknown>;
+  const flag = (input: unknown) => (typeof input === 'boolean' ? input : undefined);
+  const text = (input: unknown) =>
+    typeof input === 'string' ? input.trim().slice(0, 40) : undefined;
+
+  const meta: PhotoMeta = {
+    camera: flag(value.camera),
+    model: text(value.model),
+    software: text(value.software),
+    takenAt: flag(value.takenAt),
+    gps: flag(value.gps),
+  };
+  return Object.values(meta).some((item) => item !== undefined) ? meta : null;
+}
 
 export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Response> => {
   const auth = await authenticate(request, env);
@@ -98,7 +119,11 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
     // Полноэкранный снимок телефона по форме кадра — почти всегда скриншот.
     // Камера даёт 4:3, 3:4 или 16:9, а экран — от 19.5:9. Задание про ролик
     // прямо просит скриншот, для него правило не работает.
-    if (!task.allowScreenshot && isScreenShape(readImageSize(base64))) {
+    if (
+      !task.allowScreenshot &&
+      !task.allowCollage &&
+      isScreenShape(readImageSize(base64))
+    ) {
       return json({
         pass: false,
         score: 0,
@@ -148,7 +173,7 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
       }
     }
 
-    const verdict = await evaluatePhoto(env, task, match[0], previous);
+    const verdict = await evaluatePhoto(env, task, match[0], previous, sanitizeMeta(body?.meta));
     const passed = verdict.verdict === 'pass' && verdict.score >= 70;
 
     if (!passed) {

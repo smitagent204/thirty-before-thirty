@@ -170,10 +170,11 @@ export function TaskDetailsSheet({
     }
 
     try {
-      const { image, fingerprint } = await compressPhoto(file);
+      const { image, fingerprint, meta } = await compressPhoto(file);
       const result = await api.check(task.id, image, {
         forceFail: isDev && forceFail,
         fingerprint,
+        meta,
       });
       const isRecheck = done || result.recheck === true;
       if (isRecheck && !done) setDone(true);
@@ -519,7 +520,12 @@ export function TaskDetailsSheet({
                               Основное фото остаётся на месте. Сними тот же объект ещё раз с
                               другого ракурса — сомнение снимется, а баллы вернутся.
                             </p>
-                            {proofOpen ? (
+                            {task.allowCollage || task.allowScreenshot ? (
+                              <p className="proof-note__text">
+                                Второй ракурс здесь не подходит: кадр собран в редакторе или
+                                это скриншот. Если сомнение ошибочно — оспорь снижение баллов.
+                              </p>
+                            ) : proofOpen ? (
                               <div className="proof-form">
                                 <input
                                   ref={proofInputRef}
