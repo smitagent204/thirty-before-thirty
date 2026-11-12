@@ -1,6 +1,48 @@
 import { parseStoredDeductions } from '../../_ai';
 import { authenticate, json, type Ctx } from '../../_shared';
 
+interface PhotoRow {
+  mime: string;
+  image: string;
+  score: number;
+  verdict: string;
+  reason: string;
+  confidence: number;
+  deductions: string;
+  appealed_at: string | null;
+  appeal_prev_score: number | null;
+  appeal_text: string | null;
+  appeal_prev_deductions: string | null;
+  appeal_reason: string | null;
+  created_at: string;
+  proof_at?: string | null;
+  proof_reason?: string | null;
+  proof_prev_score?: number | null;
+}
+
+const BASE_COLUMNS = `mime, image, score, verdict, reason, confidence, deductions,
+       appealed_at, appeal_prev_score, appeal_text,
+       appeal_prev_deductions, appeal_reason`;
+
+function loadPhotoRow(env: Ctx['env'], telegramId: number, taskId: string) {
+  const query = (columns: string) =>
+    env.DB.prepare(
+      `SELECT ${columns}, created_at
+       FROM photos
+       WHERE telegram_id = ? AND task_id = ?
+       ORDER BY created_at DESC, rowid DESC
+       LIMIT 1`,
+    )
+      .bind(telegramId, taskId)
+      .first<PhotoRow>();
+
+  // Если миграция с доказательством оригинальности ещё не применена, фото
+  // всё равно должно открываться — просто без блока доказательства.
+  return query(`${BASE_COLUMNS}, proof_at, proof_reason, proof_prev_score`).catch(() =>
+    query(BASE_COLUMNS),
+  );
+}
+
 /**
  * Возвращает принятое фото выполненного задания.
  * Доступно только самому пользователю: чужие фото не отдаются.
@@ -10,32 +52,7 @@ export const onRequestGet = async ({ request, env, params }: Ctx): Promise<Respo
   if (auth instanceof Response) return auth;
 
   try {
-    const row = await env.DB.prepare(
-      `SELECT mime, image, score, verdict, reason, confidence, deductions,
-              appealed_at, appeal_prev_score, appeal_text,
-              appeal_prev_deductions, appeal_reason, created_at
-       FROM photos
-       WHERE telegram_id = ? AND task_id = ?
-       ORDER BY created_at DESC, rowid DESC
-       LIMIT 1`,
-    )
-      .bind(auth.user.id, params.id)
-      .first<{
-        mime: string;
-        image: string;
-        score: number;
-        verdict: string;
-        reason: string;
-        confidence: number;
-        deductions: string;
-        appealed_at: string | null;
-        appeal_prev_score: number | null;
-        appeal_text: string | null;
-        appeal_prev_deductions: string | null;
-        appeal_reason: string | null;
-        created_at: string;
-      }>();
-
+    const row = await loadPhotoRow(env, auth.user.id, params.id);
     if (!row) return json({ error: 'photo_not_found' }, 404);
 
     return json({
@@ -50,6 +67,9 @@ export const onRequestGet = async ({ request, env, params }: Ctx): Promise<Respo
       appealText: row.appeal_text,
       appealDeductions: parseStoredDeductions(row.appeal_prev_deductions),
       appealReason: row.appeal_reason,
+      proofAt: row.proof_at ?? null,
+      proofReason: row.proof_reason ?? null,
+      proofScoreBefore: row.proof_prev_score ?? null,
       createdAt: row.created_at,
     });
   } catch {

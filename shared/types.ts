@@ -41,6 +41,11 @@ export interface Task {
   /** Градация требований для AI-проверки */
   rubric: TaskRubric;
   emoji: string;
+  /**
+   * Задание прямо просит скриншот: экранную форму кадра не считаем признаком
+   * скачанной картинки.
+   */
+  allowScreenshot?: boolean;
 }
 
 export interface Chapter {
@@ -73,6 +78,11 @@ export interface AiDeduction {
   id?: string;
   label: string;
   percent: number;
+  /**
+   * origin — штраф за сомнение в оригинальности кадра. Такой минус снимается
+   * не апелляцией, а вторым снимком с другого ракурса.
+   */
+  kind?: 'origin';
 }
 
 export interface AiVerdict {

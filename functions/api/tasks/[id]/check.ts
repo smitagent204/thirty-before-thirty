@@ -2,6 +2,12 @@ import { computeStatuses } from '../../../../shared/progress';
 import { TASK_BY_ID } from '../../../../shared/tasks';
 import { evaluatePhoto, parseStoredDeductions } from '../../_ai';
 import {
+  fingerprintDistance,
+  isFingerprint,
+  isScreenShape,
+  readImageSize,
+} from '../../_image';
+import {
   authenticate,
   json,
   loadState,
@@ -15,7 +21,12 @@ const IMAGE_RE = /^data:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+/=\s]+)$/;
 interface CheckBody {
   image?: string;
   forceFail?: boolean;
+  /** dHash кадра, посчитанный в браузере до пережатия. */
+  fingerprint?: string;
 }
+
+/** Расстояние Хэмминга, при котором кадры считаются одним и тем же снимком. */
+const DUPLICATE_DISTANCE = 6;
 
 export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Response> => {
   const auth = await authenticate(request, env);
@@ -80,6 +91,63 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
       });
     }
 
+    const fingerprint = isFingerprint(body?.fingerprint)
+      ? body!.fingerprint.trim().toLowerCase()
+      : null;
+
+    // Полноэкранный снимок телефона по форме кадра — почти всегда скриншот.
+    // Камера даёт 4:3, 3:4 или 16:9, а экран — от 19.5:9. Задание про ролик
+    // прямо просит скриншот, для него правило не работает.
+    if (!task.allowScreenshot && isScreenShape(readImageSize(base64))) {
+      return json({
+        pass: false,
+        score: 0,
+        verdict: 'fail',
+        reason:
+          'Кадр выглядит как скриншот экрана. Задание просит фотографию: сними то, что происходит вокруг.',
+        confidence: 0.9,
+        recheck: alreadyCompleted,
+        previousScore: previous?.score ?? null,
+        deductions: [{ label: 'скриншот экрана вместо фотографии', percent: 100 }],
+      });
+    }
+
+    // Повторный кадр: тот же снимок уже был в квесте за другое задание или
+    // у другого участника. Своё же задание можно перезагружать тем же файлом.
+    if (fingerprint) {
+      try {
+        const rows = await env.DB.prepare(
+          `SELECT telegram_id, task_id, fingerprint FROM photos WHERE fingerprint IS NOT NULL`,
+        ).all<{ telegram_id: string; task_id: string; fingerprint: string }>();
+
+        const repeat = (rows.results ?? []).find((row) => {
+          if (!isFingerprint(row.fingerprint)) return false;
+          if (row.telegram_id === auth.user.id && row.task_id === task.id) return false;
+          return (
+            fingerprintDistance(fingerprint, row.fingerprint.trim().toLowerCase()) <=
+            DUPLICATE_DISTANCE
+          );
+        });
+
+        if (repeat) {
+          return json({
+            pass: false,
+            score: 0,
+            verdict: 'fail',
+            reason:
+              'Этот же кадр уже участвовал в квесте — за другое задание или у другого участника. Нужен свежий снимок.',
+            confidence: 0.95,
+            duplicate: true,
+            recheck: alreadyCompleted,
+            previousScore: previous?.score ?? null,
+            deductions: [{ label: 'фото уже использовалось в квесте', percent: 100 }],
+          });
+        }
+      } catch {
+        // До миграции колонки нет — проверку на повтор просто пропускаем.
+      }
+    }
+
     const verdict = await evaluatePhoto(env, task, match[0], previous);
     const passed = verdict.verdict === 'pass' && verdict.score >= 70;
 
@@ -119,8 +187,8 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
     const statements = [
       env.DB.prepare(
         `INSERT INTO photos
-           (id, telegram_id, task_id, mime, image, score, verdict, reason, confidence, deductions)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           (id, telegram_id, task_id, mime, image, score, verdict, reason, confidence, deductions, fingerprint)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
         photoId,
         auth.user.id,
@@ -132,6 +200,7 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
         verdict.reason,
         verdict.confidence,
         JSON.stringify(verdict.deductions ?? []),
+        fingerprint,
       ),
     ];
 
@@ -151,7 +220,12 @@ export const onRequestPost = async ({ request, env, params }: Ctx): Promise<Resp
       );
     }
 
-    await env.DB.batch(statements);
+    try {
+      await env.DB.batch(statements);
+    } catch {
+      // Чаще всего это неприменённая миграция с новыми колонками.
+      return json({ error: 'db_unavailable' }, 500);
+    }
 
     return json({
       pass: true,

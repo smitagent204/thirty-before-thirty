@@ -1,6 +1,7 @@
 import {
   buildAppealPrompt,
   buildAppealRecheckPrompt,
+  buildProofPrompt,
   buildVerificationPrompt,
   buildVerdictPrompt,
   type AppealClaim,
@@ -10,22 +11,39 @@ import type { AiDeduction, AiVerdict, Task, TaskRequirement } from '../../shared
 import type { Env } from './_shared';
 
 const PASS_SCORE = 70;
-const INVALID_SCORE = 15;
+/** Посторонний кадр, скриншот или монтаж не заслуживают «утешительных» баллов. */
+const INVALID_SCORE = 0;
 const FALLBACK_MISS_PERCENT = 35;
+/** Небольшой штраф, если кадр похож на скачанный, но прямых улик нет. */
+const SOURCE_PENALTY = 20;
+const SOURCE_DOWNLOADED_REASON =
+  'Кадр выглядит как скачанный из интернета — для квеста нужен свой снимок с места.';
 
 interface RawDeduction {
   id?: string;
   label?: string;
-  /** missing — полный вес, partial — половина. percent оставлен для старых ответов. */
+  /** missing — пункта нет, partial — виден частично. */
   state?: 'missing' | 'partial';
+  /**
+   * Доля веса, которой не хватает: 0.05–1. Даёт живые оценки вроде −7 или −24
+   * вместо жёстких −15 и −35. Без severity работает прежняя схема (полный вес
+   * за missing, половина за partial).
+   */
+  severity?: number;
+  /** Оставлен для старых ответов без state. */
   percent?: number;
 }
+
+type RawSource = 'own' | 'suspicious' | 'downloaded';
 
 interface RawVerdict {
   reason: string;
   confidence: number;
   invalid: boolean;
   allVisible: boolean;
+  /** Происхождение кадра: скачанный или стоковый не должен приносить баллы. */
+  source: RawSource;
+  sourceNote: string | null;
   deductions: RawDeduction[];
 }
 
@@ -65,11 +83,21 @@ function parseRawDeductions(raw: unknown): RawDeduction[] {
           : undefined;
     const rawPercent = Number(value.percent ?? value.points ?? value.value);
     const percent = Number.isFinite(rawPercent) && rawPercent > 0 ? Math.round(rawPercent) : undefined;
-    if (!state && percent === undefined) continue;
+
+    // severity — доля веса, которой не хватает. Модель может прислать 0.6 или
+    // 60 — приводим к шкале 0–1, чтобы «−9%» и «−23%» были возможны.
+    const rawSeverity = Number(value.severity ?? value.share ?? value.degree);
+    let severity: number | undefined;
+    if (Number.isFinite(rawSeverity) && rawSeverity > 0) {
+      const normalized = rawSeverity > 1 ? rawSeverity / 100 : rawSeverity;
+      severity = Math.max(0.05, Math.min(1, normalized));
+    }
+
+    if (!state && percent === undefined && severity === undefined) continue;
 
     const id = typeof value.id === 'string' ? value.id.trim() : undefined;
     const label = typeof value.label === 'string' ? value.label.trim() : undefined;
-    items.push({ id, label, state, percent });
+    items.push({ id, label, state, percent, severity });
   }
 
   return items.slice(0, 8);
@@ -83,16 +111,32 @@ export function parseVerdict(text: string): RawVerdict | null {
 
   try {
     const raw = JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>;
+    const invalid = raw.invalid === true;
     const reason = typeof raw.reason === 'string' ? raw.reason.slice(0, 300).trim() : '';
     const confidence = Number(raw.confidence);
-    if (!reason || !Number.isFinite(confidence)) return null;
+    if ((!reason && !invalid) || !Number.isFinite(confidence)) return null;
+
+    const rawSource = typeof raw.source === 'string' ? raw.source.toLowerCase() : '';
+    const source: RawSource =
+      rawSource === 'downloaded' || rawSource === 'скачано' || rawSource === 'stock'
+        ? 'downloaded'
+        : rawSource === 'suspicious' || rawSource === 'подозрительно'
+          ? 'suspicious'
+          : 'own';
+    const sourceNote =
+      typeof raw.source_note === 'string' && raw.source_note.trim()
+        ? raw.source_note.trim().slice(0, 160)
+        : null;
 
     return {
-      reason,
+      // Для invalid пустая похвала не ошибка: покажем понятное объяснение.
+      reason: reason || 'Фото не относится к заданию.',
       confidence: Math.max(0, Math.min(1, confidence)),
-      invalid: raw.invalid === true,
+      invalid,
       // Старые ответы без all_visible считаем «всё видно», если нет вычетов.
       allVisible: raw.all_visible !== false,
+      source,
+      sourceNote,
       deductions: parseRawDeductions(raw.deductions),
     };
   } catch {
@@ -115,6 +159,7 @@ export function parseStoredDeductions(raw: unknown): AiDeduction[] {
         if (!label || !Number.isFinite(percent) || percent <= 0) return null;
         return {
           ...(typeof value.id === 'string' ? { id: value.id } : {}),
+          ...(value.kind === 'origin' ? { kind: 'origin' as const } : {}),
           label,
           percent: Math.round(percent),
         } satisfies AiDeduction;
@@ -151,15 +196,17 @@ export function applyDeductions(
   for (const deduction of raw) {
     const requirement = matchRequirement(deduction, required);
     if (!requirement) continue;
-    const percent =
-      deduction.state === 'partial'
-        ? Math.max(1, Math.round(requirement.weight / 2))
-        : deduction.state === 'missing'
-          ? requirement.weight
-          : Math.max(
-              1,
-              Math.min(requirement.weight, deduction.percent ?? requirement.weight),
-            );
+    // severity задаёт живую долю штрафа; без неё — прежняя схема «половина
+    // за partial, полный вес за missing». Верхняя граница — вес пункта.
+    let percent =
+      deduction.severity !== undefined
+        ? Math.round(requirement.weight * deduction.severity)
+        : deduction.state === 'partial'
+          ? Math.round(requirement.weight / 2)
+          : deduction.state === 'missing'
+            ? requirement.weight
+            : (deduction.percent ?? requirement.weight);
+    percent = Math.max(1, Math.min(requirement.weight, percent));
     const current = byId.get(requirement.id);
     if (!current || percent > current.percent) {
       byId.set(requirement.id, {
@@ -190,6 +237,22 @@ function buildVerdict(
     };
   }
 
+  // Скачанный кадр не засчитывается, даже если всё формально «видно»:
+  // смысл заданий в том, чтобы человек снял это сам. Если модель сама не
+  // уверена, это не «downloaded», а «suspicious» — не обнуляем честное фото.
+  const downloaded = raw.source === 'downloaded' && raw.confidence >= 0.6;
+  if (downloaded) {
+    return {
+      score: INVALID_SCORE,
+      verdict: 'fail',
+      reason: raw.sourceNote ?? SOURCE_DOWNLOADED_REASON,
+      confidence: raw.confidence,
+      deductions: [
+        { kind: 'origin' as const, label: 'кадр скачан из интернета, а не снят самим', percent: 100 },
+      ],
+    };
+  }
+
   let deductions = applyDeductions(raw.deductions, task.rubric.required);
 
   // Модель сказала, что чего-то не хватает, но не назвала пункт.
@@ -203,15 +266,61 @@ function buildVerdict(
     ];
   }
 
-  const total = deductions.reduce((sum, item) => sum + item.percent, 0);
-  const score = Math.max(0, Math.min(100, 100 - total));
+  // Не видно ни одного обязательного пункта — снимок не про задание. Не
+  // оставляем проценты «за то, что осталось»: сумма весов может быть меньше
+  // 100, и посторонний кадр получал бы 10–15% просто по арифметике.
+  // Считаем по состоянию, а не по процентам: severity у таких пунктов может
+  // быть меньше полного веса.
+  const fullyMissing = new Set<string>();
+  for (const item of raw.deductions) {
+    if (!item.id) continue;
+    const requirement = task.rubric.required.find((entry) => entry.id === item.id);
+    if (!requirement) continue;
+    if (
+      item.state === 'missing' ||
+      (item.state === undefined && (item.percent ?? 0) >= requirement.weight)
+    ) {
+      fullyMissing.add(item.id);
+    }
+  }
+  const missesEverything =
+    task.rubric.required.length > 0 &&
+    task.rubric.required.every((requirement) => fullyMissing.has(requirement.id));
+
+  // Показываем одну понятную причину вместо списка из пяти пунктов: при
+  // полностью постороннем кадре детализация ничего не объясняет.
+  const finalDeductions: AiDeduction[] = missesEverything
+    ? [{ label: 'фото не относится к заданию: не видно ни одной обязательной детали', percent: 100 }]
+    : [...deductions];
+
+  // Кадр не пойман на прямой улике, но выглядит стоковым: полного балла за
+  // скачанную картинку быть не должно, при этом честное фото всё равно пройдёт.
+  const doubtfulOrigin =
+    raw.source === 'suspicious' || (raw.source === 'downloaded' && !downloaded);
+  if (!missesEverything && doubtfulOrigin) {
+    finalDeductions.push({
+      kind: 'origin' as const,
+      label: 'кадр похож на скачанный из интернета: в нём нет живых деталей места и момента',
+      percent: SOURCE_PENALTY,
+    });
+  }
+
+  const total = finalDeductions.reduce((sum, item) => sum + item.percent, 0);
+  // Сомнение в оригинальности снижает баллы, но не проваливает кадр, который
+  // прошёл по содержанию: его можно оправдать вторым снимком с другого ракурса.
+  const contentTotal = finalDeductions.reduce(
+    (sum, item) => (item.kind === 'origin' ? sum : sum + item.percent),
+    0,
+  );
+  const score = missesEverything ? 0 : Math.max(0, Math.min(100, 100 - total));
+  const passed = !missesEverything && 100 - contentTotal >= PASS_SCORE;
 
   return {
     score,
-    verdict: score >= PASS_SCORE ? 'pass' : 'fail',
+    verdict: passed ? 'pass' : 'fail',
     reason: raw.reason,
     confidence: raw.confidence,
-    deductions,
+    deductions: finalDeductions,
   };
 }
 
@@ -219,7 +328,7 @@ async function askModel(
   env: Env,
   model: string,
   prompt: string,
-  image: string,
+  images: string[],
 ): Promise<string> {
   const result = await env.AI.run(model, {
     messages: [
@@ -227,7 +336,7 @@ async function askModel(
         role: 'user',
         content: [
           { type: 'text', text: prompt },
-          { type: 'image_url', image_url: { url: image } },
+          ...images.map((url) => ({ type: 'image_url', image_url: { url } })),
         ],
       },
     ],
@@ -237,7 +346,13 @@ async function askModel(
   return extractText(result).trim();
 }
 
-async function runVision(env: Env, prompt: string, image: string): Promise<string> {
+/** Один кадр для обычной проверки или два — для доказательства оригинальности. */
+async function runVision(
+  env: Env,
+  prompt: string,
+  image: string | string[],
+): Promise<string> {
+  const images = Array.isArray(image) ? image : [image];
   const models = [
     env.AI_MODEL || '@cf/meta/llama-4-scout-17b-16e-instruct',
     env.AI_FALLBACK_MODEL || '@cf/meta/llama-3.2-11b-vision-instruct',
@@ -246,7 +361,7 @@ async function runVision(env: Env, prompt: string, image: string): Promise<strin
   let lastError: unknown = null;
   for (const model of models) {
     try {
-      const text = await askModel(env, model, prompt, image);
+      const text = await askModel(env, model, prompt, images);
       if (text) return text;
     } catch (error) {
       lastError = error;
@@ -402,7 +517,15 @@ async function verifyDeductions(
       const requirement = task.rubric.required.find((entry) => entry.id === item.id);
       // Проверяем формулировку требования, а не текст минуса: «бренды не читаются»
       // нельзя перепроверить как «чего не хватает».
-      return { id: item.id, label: requirement?.label ?? item.label };
+      return {
+        id: item.id,
+        label: requirement?.label ?? item.label,
+        // Сохраняем выбранную моделью тяжесть минуса: перепроверка меняет
+        // только state, а не сглаживает штраф до полного или половинного веса.
+        severity: requirement
+          ? Math.max(0.05, Math.min(1, item.percent / requirement.weight))
+          : undefined,
+      };
     });
   if (claims.length === 0) return null;
 
@@ -417,7 +540,11 @@ async function verifyDeductions(
       const state = checks.get(claim.id);
       // Нет вердикта по пункту — не считаем его доказанным минусом.
       if (!state || state === 'ok') continue;
-      verified.push({ id: claim.id, state });
+      const severity =
+        state === 'partial' && claim.severity !== undefined
+          ? Math.min(claim.severity, 0.55)
+          : claim.severity;
+      verified.push({ id: claim.id, state, severity });
     }
     return { deductions: verified, reason };
   } catch {
@@ -551,6 +678,64 @@ export async function appealVerdict(
     relieved: before - after,
     applied,
   };
+}
+
+export interface ProofOutcome {
+  /** Минус за сомнение можно снять. */
+  accepted: boolean;
+  reason: string;
+  sameScene: 'yes' | 'partial' | 'no';
+  freshAngle: boolean;
+  sameImage: boolean;
+  source: RawSource;
+}
+
+function parseProof(text: string): ProofOutcome | null {
+  const cleaned = text.replace(/```json/gi, '').replace(/```/g, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end <= start) return null;
+
+  try {
+    const raw = JSON.parse(cleaned.slice(start, end + 1)) as Record<string, unknown>;
+    const sceneRaw = typeof raw.same_scene === 'string' ? raw.same_scene.toLowerCase() : '';
+    const sameScene = sceneRaw === 'yes' || sceneRaw === 'partial' || sceneRaw === 'no'
+      ? sceneRaw
+      : null;
+    if (!sameScene) return null;
+
+    const reason = typeof raw.reason === 'string' ? raw.reason.slice(0, 400).trim() : '';
+    if (!reason) return null;
+
+    const freshAngle = raw.fresh_angle === true;
+    const sameImage = raw.same_image === true;
+    const sourceRaw = typeof raw.source === 'string' ? raw.source.toLowerCase() : '';
+    const source: RawSource =
+      sourceRaw === 'downloaded' ? 'downloaded' : sourceRaw === 'suspicious' ? 'suspicious' : 'own';
+
+    // Доказательство принимается только когда это тот же объект, снятый заново
+    // с другой точки, и второй кадр не является копией первого.
+    const accepted = sameScene === 'yes' && freshAngle && !sameImage && source !== 'downloaded';
+
+    return { accepted, reason, sameScene, freshAngle, sameImage, source };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Сравнение основного кадра с доказательством: та же ли это сцена, снятая
+ * заново с другого ракурса. Ошибка модели не снимает и не подтверждает минус —
+ * вызывающий код вернёт ошибку, и попытка не сгорит.
+ */
+export async function proveOriginality(
+  env: Env,
+  task: Task,
+  images: string[],
+): Promise<ProofOutcome> {
+  const outcome = parseProof(await runVision(env, buildProofPrompt(task), images));
+  if (!outcome) throw new Error('ai_invalid_response');
+  return outcome;
 }
 
 /** Единая проверка фото для обычной загрузки, повторной попытки и переоценки. */

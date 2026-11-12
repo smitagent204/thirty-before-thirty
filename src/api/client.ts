@@ -95,7 +95,27 @@ export interface PhotoResult {
   appealDeductions?: AiDeduction[];
   /** Что ИИ ответил на апелляцию. */
   appealReason?: string | null;
+  /** Когда фото доказывали вторым кадром; null — попытка ещё доступна. */
+  proofAt?: string | null;
+  /** Ответ ИИ на второй кадр. */
+  proofReason?: string | null;
+  /** Оценка до доказательства оригинальности. */
+  proofScoreBefore?: number | null;
   createdAt: string;
+}
+
+export interface ProofResult {
+  taskId: string;
+  title: string;
+  /** Второй кадр подтвердил, что сцена та же и снята заново. */
+  accepted: boolean;
+  scoreBefore: number;
+  score: number;
+  verdict: string;
+  deductions: AiDeduction[];
+  /** Объяснение ИИ: что совпало или почему не приняли. */
+  proofReason: string;
+  proofAt: string;
 }
 
 export interface AppealResult {
@@ -171,10 +191,18 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 export const api = {
   state: () => request<ServerState>('/api/state'),
 
-  check: (taskId: string, image: string, forceFail = false) =>
+  check: (
+    taskId: string,
+    image: string,
+    options: { forceFail?: boolean; fingerprint?: string } = {},
+  ) =>
     request<CheckResult>(`/api/tasks/${encodeURIComponent(taskId)}/check`, {
       method: 'POST',
-      body: JSON.stringify({ image, forceFail }),
+      body: JSON.stringify({
+        image,
+        forceFail: options.forceFail === true,
+        fingerprint: options.fingerprint || undefined,
+      }),
     }),
 
   manual: (taskId: string, pin: string) =>
@@ -220,5 +248,11 @@ export const api = {
     request<AppealResult>(`/api/tasks/${encodeURIComponent(taskId)}/appeal`, {
       method: 'POST',
       body: JSON.stringify({ text }),
+    }),
+
+  proof: (taskId: string, image: string, fingerprint?: string) =>
+    request<ProofResult>(`/api/tasks/${encodeURIComponent(taskId)}/proof`, {
+      method: 'POST',
+      body: JSON.stringify({ image, fingerprint: fingerprint || undefined }),
     }),
 };
