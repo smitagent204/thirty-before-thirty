@@ -777,13 +777,44 @@ export function DevPanel({ onClose }: DevPanelProps) {
                         onDismiss={(item) => void dismissDeduction(inspectTask.id, item)}
                       />
                       {inspectState.photo.appealedAt && (
-                        <p className="dev-note" style={{ marginTop: 8 }}>
-                          Апелляция рассмотрена
-                          {typeof inspectState.photo.appealScoreBefore === 'number'
-                            ? ` · было ${inspectState.photo.appealScoreBefore}%`
-                            : ''}
-                          .
-                        </p>
+                        <div className="appeal-note appeal-note--result" style={{ marginTop: 8 }}>
+                          <p className="appeal-note__summary">
+                            Апелляция жены рассмотрена
+                            {typeof inspectState.photo.appealScoreBefore === 'number'
+                              ? `: ${inspectState.photo.appealScoreBefore}% → ${inspectState.photo.score}%`
+                              : ''}
+                            {' · '}
+                            {formatDateTime(inspectState.photo.appealedAt)}
+                          </p>
+                          {(inspectState.photo.appealDeductions?.length ?? 0) > 0 && (
+                            <>
+                              <p className="appeal-details__title">
+                                Замечания до апелляции
+                              </p>
+                              <VerdictDetails
+                                deductions={inspectState.photo.appealDeductions}
+                                taskId={inspectTask.id}
+                                compact
+                              />
+                            </>
+                          )}
+                          {inspectState.photo.appealText && (
+                            <>
+                              <p className="appeal-details__title">Что написала жена</p>
+                              <p className="appeal-details__quote">
+                                «{inspectState.photo.appealText}»
+                              </p>
+                            </>
+                          )}
+                          {inspectState.photo.appealReason && (
+                            <>
+                              <p className="appeal-details__title">Ответ ИИ</p>
+                              <p className="appeal-details__text">
+                                {inspectState.photo.appealReason}
+                              </p>
+                            </>
+                          )}
+                        </div>
                       )}
                       {(inspectState.photo.deductions?.length ?? 0) > 0 && (
                         <p className="dev-note" style={{ marginTop: 8 }}>

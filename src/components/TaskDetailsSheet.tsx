@@ -183,6 +183,9 @@ export function TaskDetailsSheet({
         verdict: result.verdict,
         reason: result.reason,
         confidence: result.confidence,
+        // Минусы нужны и при провале: иначе видно только похвалу и не понять,
+        // что именно не засчитали.
+        deductions: result.deductions ?? [],
       });
       if (result.pass) {
         // Сервер мог сохранить новый кадр — старый из кэша больше не нужен.
@@ -820,8 +823,12 @@ export function TaskDetailsSheet({
                   >
                     <span className="verdict__score">{verdict.score}%</span>
                     <div className="verdict__body">
-                      {verdict.verdict === 'pass' && (
+                      {verdict.verdict === 'pass' ? (
                         <strong className="verdict__title">Фото принято</strong>
+                      ) : (
+                        <strong className="verdict__title">
+                          Фото не принято. Что не засчитали:
+                        </strong>
                       )}
                       <VerdictDetails
                         reason={verdict.reason}

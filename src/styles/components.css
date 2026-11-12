@@ -482,6 +482,10 @@
   color: #e4ffe8;
 }
 
+.verdict--fail .verdict__title {
+  color: #ffd6d6;
+}
+
 /* Похвала и минусы — разными блоками: проценты жёлтые, текст спокойный. */
 .verdict-details {
   display: flex;
