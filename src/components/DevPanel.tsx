@@ -273,7 +273,8 @@ export function DevPanel({ onClose }: DevPanelProps) {
 
   const openRecheck = () => {
     if (rechecking || recheckableIds.length === 0) return;
-    setRecheckSelected(recheckableIds);
+    // По умолчанию ничего не выбрано: отмечаем только те задания, которые нужны.
+    setRecheckSelected([]);
     setRecheckOpen(true);
   };
 
@@ -281,6 +282,16 @@ export function DevPanel({ onClose }: DevPanelProps) {
     setRecheckSelected((prev) =>
       prev.includes(taskId) ? prev.filter((id) => id !== taskId) : [...prev, taskId],
     );
+  };
+
+  const allRecheckSelected =
+    recheckableIds.length > 0 &&
+    recheckableIds.every((taskId) => recheckSelected.includes(taskId));
+  const someRecheckSelected = recheckSelected.length > 0 && !allRecheckSelected;
+
+  /** Чекбокс «все»: первый клик отмечает всё, повторный — снимает все отметки. */
+  const toggleAllRecheck = () => {
+    setRecheckSelected(allRecheckSelected ? [] : recheckableIds);
   };
 
   const dismissDeduction = async (taskId: string, item: AiDeduction) => {
@@ -618,7 +629,28 @@ export function DevPanel({ onClose }: DevPanelProps) {
             </div>
 
             <div className="sheet__body">
-              <div className="dev-list">
+              <label className="dev-check dev-check--master">
+                <input
+                  type="checkbox"
+                  checked={allRecheckSelected}
+                  ref={(element) => {
+                    // Частичный выбор показываем прочёркиванием, как в привычных списках.
+                    if (element) element.indeterminate = someRecheckSelected;
+                  }}
+                  disabled={recheckableIds.length === 0}
+                  onChange={toggleAllRecheck}
+                />
+                <span>
+                  Выбрать все
+                  <span className="dev-check__hint">
+                    {recheckSelected.length === 0
+                      ? 'Ничего не отмечено — выбери задания по одному или отметь все'
+                      : `Отмечено ${recheckSelected.length} из ${recheckableIds.length}`}
+                  </span>
+                </span>
+              </label>
+
+              <div className="dev-list" style={{ marginTop: 8 }}>
                 {recheckIds.map((taskId) => {
                   const task = TASK_BY_ID.get(taskId);
                   const photo = wifePhotos[taskId];

@@ -1255,6 +1255,16 @@
   cursor: pointer;
 }
 
+.dev-check--master {
+  border-color: rgba(255, 215, 94, 0.28);
+  background: rgba(255, 215, 94, 0.06);
+  font-weight: 600;
+}
+
+.dev-check--master .dev-check__hint {
+  font-weight: 400;
+}
+
 .dev-check--disabled {
   opacity: 0.55;
   cursor: default;
