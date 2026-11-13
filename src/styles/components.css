@@ -759,10 +759,27 @@
   object-fit: cover;
 }
 
+/*
+ * Раньше кнопки стояли во flex и тянулись по содержимому: при смене подписи
+ * «Отправить» → «Сравниваем…» правая кнопка становилась шире, а «Отмена»
+ * выезжала за пределы карточки. Сетка держит обе колонки одинаковыми.
+ */
 .proof-form__actions {
-  display: flex;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 8px;
+  width: 100%;
+}
+
+.proof-form__actions .btn {
+  width: 100%;
+  min-width: 0;
+  padding: 0 8px;
+  font-size: 11.5px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .proof-form__hint {
