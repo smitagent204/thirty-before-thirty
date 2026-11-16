@@ -11,6 +11,7 @@ import { LevelScreen } from './screens/LevelScreen';
 import { TaskDetailsSheet } from './components/TaskDetailsSheet';
 import { ChestScreen } from './components/ChestScreen';
 import { DevPanel } from './components/DevPanel';
+import { PointsFlight } from './components/PointsFlight';
 import { useProgressStore } from './store/useProgressStore';
 import { impact, useTelegram } from './telegram/useTelegram';
 import { api, ApiError, type WifeState } from './api/client';
@@ -416,6 +417,9 @@ export default function App() {
       {devOpen && devActive && <DevPanel onClose={() => setDevOpen(false)} />}
 
       {!hallIntroSeen && <div className="hall-intro" aria-hidden="true" />}
+
+      {/* Звёзды летят из кнопки «Забрать» в счётчик — поверх шторки и шапки. */}
+      <PointsFlight />
 
       {toast && <div className="toast">{toast}</div>}
     </div>

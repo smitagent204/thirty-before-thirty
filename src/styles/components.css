@@ -359,10 +359,35 @@
   animation: confetti-burst var(--dur) var(--e-out) var(--delay) forwards;
 }
 
+/* ─────────────────────── Звёзды к счётчику ─────────────────────── */
+
+/*
+ * Слой живёт поверх шторки: кнопка «Забрать» исчезает вместе с листом, а
+ * звёзды продолжают лететь к счётчику в шапке.
+ */
+.points-flight {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-fx);
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.points-flight__star {
+  position: fixed;
+  color: #ffd75e;
+  line-height: 1;
+  text-shadow:
+    0 0 8px rgba(255, 215, 94, 0.85),
+    0 0 20px rgba(255, 176, 94, 0.5);
+  will-change: transform, opacity;
+}
+
 .accept-fx__stamp {
   position: absolute;
   top: 12px;
   right: 12px;
+
   display: inline-flex;
   align-items: center;
   gap: 5px;

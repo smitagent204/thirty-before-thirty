@@ -12,6 +12,7 @@ import {
 import { impact, notify } from '../telegram/useTelegram';
 import { api, ApiError, hasTelegramAuth, type PhotoResult } from '../api/client';
 import { compressPhoto } from '../lib/photo';
+import { launchPointsFlight } from '../lib/pointsFlight';
 import { invalidatePhoto, loadPhoto } from '../api/photoCache';
 import { ManualApprovalSheet } from './ManualApprovalSheet';
 import { VerdictDetails } from './VerdictDetails';
@@ -78,6 +79,8 @@ export function TaskDetailsSheet({
   const timer = useRef<number | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const proofInputRef = useRef<HTMLInputElement>(null);
+  const collectRef = useRef<HTMLButtonElement>(null);
+  const collected = useRef(false);
   const serverAuth = hasTelegramAuth();
   const confetti = useMemo(
     () =>
@@ -477,7 +480,17 @@ export function TaskDetailsSheet({
   };
 
   const collect = () => {
+    // Лист закрывается с анимацией и ещё немного кликабелен — второй тап
+    // запустил бы второй полёт звёзд за те же баллы.
+    if (collected.current) return;
+    collected.current = true;
+    // Точку вылета берём до закрытия листа: кнопка исчезнет вместе со шторкой.
+    const rect = collectRef.current?.getBoundingClientRect();
     onComplete(task.id);
+    launchPointsFlight(
+      rect ? { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } : null,
+      task.points,
+    );
     notify('success');
     onClose();
   };
@@ -1027,7 +1040,7 @@ export function TaskDetailsSheet({
                 Закрыть
               </button>
             ) : !done && phase === 'pass' ? (
-              <button type="button" className="btn" onClick={collect}>
+              <button ref={collectRef} type="button" className="btn" onClick={collect}>
                 Забрать +{task.points}
               </button>
             ) : (

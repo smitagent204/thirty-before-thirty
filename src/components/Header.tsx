@@ -1,6 +1,7 @@
-import { useRef } from 'react';
+import { useRef, useSyncExternalStore } from 'react';
 import { TOTAL_POINTS } from '@shared/levels';
 import { CountdownMini } from './Countdown';
+import { getWithheld, subscribeWithheld } from '../lib/pointsFlight';
 
 interface HeaderProps {
   points: number;
@@ -19,6 +20,11 @@ export function Header({
   hallActive,
 }: HeaderProps) {
   const timer = useRef<number | null>(null);
+
+  // Пока звёзды летят от кнопки «Забрать», часть баллов «в пути»: счётчик
+  // вычитает их и прибавляет по одной звезде в момент прилёта.
+  const withheld = useSyncExternalStore(subscribeWithheld, getWithheld, getWithheld);
+  const shown = Math.max(0, points - withheld);
 
   const start = () => {
     if (timer.current) window.clearTimeout(timer.current);
@@ -50,13 +56,17 @@ export function Header({
         </div>
         <button
           type="button"
-          className="score score--button"
+          className={`score score--button${withheld > 0 ? ' score--filling' : ''}`}
+          data-score-target=""
           onClick={onOpenHall}
-          aria-label={`${points} из ${TOTAL_POINTS} баллов. Открыть аллею славы`}
+          aria-label={`${shown} из ${TOTAL_POINTS} баллов. Открыть аллею славы`}
           aria-current={hallActive ? 'page' : undefined}
         >
           <span aria-hidden="true">✦</span>
-          {points}
+          {/* key заставляет цифру проигрывать «подскок» на каждом новом балле */}
+          <span className="score__value" key={shown}>
+            {shown}
+          </span>
           <span className="score__total">/ {TOTAL_POINTS}</span>
         </button>
       </div>
